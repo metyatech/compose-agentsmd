@@ -22,4 +22,3 @@ The tool searches for `agent-ruleset.json` under the given root directory (defau
 - `--root <path>`: project root (defaults to current working directory)
 - `--ruleset <path>`: only compose a single ruleset file
 - `--ruleset-name <name>`: override the ruleset filename (default: `agent-ruleset.json`)
-
