@@ -3,6 +3,21 @@
   "version": "1.0.0",
   "description": "CLI tools for composing per-project AGENTS.md files from modular rule sets",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/metyatech/compose-agentsmd.git"
+  },
+  "bugs": {
+    "url": "https://github.com/metyatech/compose-agentsmd/issues"
+  },
+  "homepage": "https://github.com/metyatech/compose-agentsmd#readme",
+  "keywords": [
+    "agents",
+    "agentsmd",
+    "rules",
+    "cli",
+    "markdown"
+  ],
   "type": "commonjs",
   "bin": {
     "compose-agentsmd": "dist/compose-agents.js"
