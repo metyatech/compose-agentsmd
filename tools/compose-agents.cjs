@@ -5,6 +5,7 @@ const DEFAULT_RULESET_NAME = "agent-ruleset.json";
 const DEFAULT_RULES_ROOT = "agent-rules/rules";
 const DEFAULT_GLOBAL_DIR = "global";
 const DEFAULT_DOMAINS_DIR = "domains";
+const DEFAULT_OUTPUT = "AGENTS.md";
 const DEFAULT_IGNORE_DIRS = new Set([
   ".git",
   "agent-rules",
@@ -100,7 +101,9 @@ const readJsonFile = (filePath) => {
 const readProjectRuleset = (rulesetPath) => {
   const parsed = readJsonFile(rulesetPath);
 
-  if (!isNonEmptyString(parsed.output)) {
+  if (parsed.output === undefined) {
+    parsed.output = DEFAULT_OUTPUT;
+  } else if (!isNonEmptyString(parsed.output)) {
     throw new Error(`Invalid ruleset output in ${rulesetPath}`);
   }
 

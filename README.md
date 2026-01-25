@@ -15,19 +15,19 @@ From each project root:
 node agent-rules-tools/tools/compose-agents.cjs
 ```
 
-The tool searches for `agent-ruleset.json` under the given root directory (default: current working directory), and writes output files as specified by each ruleset.
+The tool searches for `agent-ruleset.json` under the given root directory (default: current working directory), and writes output files as specified by each ruleset. If `output` is omitted, it defaults to `AGENTS.md`.
 
 ## Project ruleset format
 
 ```json
 {
-  "output": "AGENTS.md",
   "domains": ["node", "unreal"],
   "rules": ["agent-rules-local/custom.md"]
 }
 ```
 
 - Global rules are always included from `agent-rules/rules/global`.
+- `output` is optional; when omitted, `AGENTS.md` is used.
 - `domains` selects domain folders under `agent-rules/rules/domains`.
 - `rules` is optional and appends additional rule files.
 
