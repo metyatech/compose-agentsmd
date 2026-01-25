@@ -1,6 +1,6 @@
 {
   "name": "compose-agentsmd",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "CLI tools for composing per-project AGENTS.md files from modular rule sets",
   "license": "MIT",
   "repository": {
@@ -18,17 +18,23 @@
     "cli",
     "markdown"
   ],
-  "type": "commonjs",
+  "type": "module",
   "bin": {
     "compose-agentsmd": "dist/compose-agents.js"
   },
   "files": [
     "dist",
-    "tools"
+    "tools",
+    "README.md",
+    "LICENSE"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "lint": "tsc -p tsconfig.json --noEmit",
+    "prepare": "npm run build",
     "prepack": "npm run build",
     "test": "npm run build && node --test",
     "compose": "npm run build && node dist/compose-agents.js"
