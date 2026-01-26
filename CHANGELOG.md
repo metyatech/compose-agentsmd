@@ -19,3 +19,8 @@ All notable changes to this project will be documented in this file.
 
 ## 1.1.2 - 2026-01-26
 - Clarified that version bumps must include both release creation and package publishing.
+
+## 2.0.0 - 2026-01-26
+- Switched ruleset format to `source/global/domains/extra` with remote GitHub sources and cache support in `~/.agentsmd`.
+- Added `--refresh` and `--clear-cache` cache management commands.
+- Updated ruleset schema, tests, and README to match the new format.

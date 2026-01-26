@@ -1,4 +1,5 @@
 {
-  "output": "AGENTS.md",
-  "domains": ["node"]
+  "source": "./agent-rules",
+  "domains": ["node"],
+  "output": "AGENTS.md"
 }

@@ -47,59 +47,40 @@ The tool searches for `agent-ruleset.json` under the given root directory (defau
 
 The tool prepends a small "Tool Rules" block to every generated `AGENTS.md` so agents know how to regenerate or update rules.
 
-### Rules root resolution (important for global installs)
-
-When installed globally, the rules directory is usually outside the project. You can point to it in either of the following ways:
-
-```sh
-compose-agentsmd --rules-root "C:/path/to/agent-rules/rules"
-```
-
-Or via environment variable:
-
-```sh
-set AGENT_RULES_ROOT=C:/path/to/agent-rules/rules
-compose-agentsmd
-```
-
-Rules root resolution precedence is:
-
-- `--rules-root` CLI option
-- `AGENT_RULES_ROOT` environment variable
-- `rulesRoot` in the ruleset file
-- Default: `agent-rules/rules` relative to the ruleset file
-
 ## Project ruleset format
 
 ```json
 {
-  "output": "AGENTS.md",
+  "source": "github:org/agent-rules@latest",
   "domains": ["node", "unreal"],
-  "rules": ["agent-rules-local/custom.md"]
+  "extra": ["agent-rules-local/custom.md"],
+  "output": "AGENTS.md"
 }
 ```
 
-- Global rules are always included from `agent-rules/rules/global`.
-- `output` is optional; when omitted, `AGENTS.md` is used.
-- `domains` selects domain folders under `agent-rules/rules/domains`.
-- `rules` is optional and appends additional rule files.
+Ruleset keys:
+
+- `source` (required): rules source. Use `github:owner/repo@ref` or a local path.
+- `global` (optional): include `rules/global` (defaults to true). Omit this unless you want to disable globals.
+- `domains` (optional): domain folders under `rules/domains/<domain>`.
+- `extra` (optional): additional local rule files to append.
+- `output` (optional): output file name (defaults to `AGENTS.md`).
 
 ### Ruleset schema validation
 
 `compose-agentsmd` validates rulesets against `agent-ruleset.schema.json` on every run. If the ruleset does not conform to the schema, the tool exits with a schema error.
 
-Optional path overrides:
+### Cache
 
-- `rulesRoot`: override `agent-rules/rules`.
-- `globalDir`: override `global` (relative to `rulesRoot`).
-- `domainsDir`: override `domains` (relative to `rulesRoot`).
+Remote sources are cached under `~/.agentsmd/<owner>/<repo>/<ref>/`. Use `--refresh` to re-fetch or `--clear-cache` to remove cached rules.
 
 ### Optional arguments
 
 - `--root <path>`: project root (defaults to current working directory)
 - `--ruleset <path>`: only compose a single ruleset file
 - `--ruleset-name <name>`: override the ruleset filename (default: `agent-ruleset.json`)
-- `--rules-root <path>`: override the rules root for all rulesets (or set `AGENT_RULES_ROOT`)
+- `--refresh`: refresh cached remote rules
+- `--clear-cache`: remove cached remote rules and exit
 
 ## Development
 

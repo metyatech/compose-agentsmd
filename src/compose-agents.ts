@@ -2,14 +2,13 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
+import { execFileSync } from "node:child_process";
 import { Ajv, type ErrorObject } from "ajv";
 
 const DEFAULT_RULESET_NAME = "agent-ruleset.json";
-const DEFAULT_RULES_ROOT = "agent-rules/rules";
-const DEFAULT_GLOBAL_DIR = "global";
-const DEFAULT_DOMAINS_DIR = "domains";
-const RULES_ROOT_ENV_VAR = "AGENT_RULES_ROOT";
 const DEFAULT_OUTPUT = "AGENTS.md";
+const DEFAULT_CACHE_ROOT = path.join(os.homedir(), ".agentsmd");
 const RULESET_SCHEMA_PATH = new URL("../agent-ruleset.schema.json", import.meta.url);
 const TOOL_RULES = [
   "# Tool Rules (compose-agentsmd)",
@@ -39,16 +38,18 @@ type CliArgs = {
   root?: string;
   ruleset?: string;
   rulesetName?: string;
-  rulesRoot?: string;
+  refresh?: boolean;
+  clearCache?: boolean;
 };
 
-const usage = `Usage: compose-agentsmd [--root <path>] [--ruleset <path>] [--ruleset-name <name>] [--rules-root <path>]
+const usage = `Usage: compose-agentsmd [--root <path>] [--ruleset <path>] [--ruleset-name <name>] [--refresh] [--clear-cache]
 
 Options:
   --root <path>         Project root directory (default: current working directory)
   --ruleset <path>      Only compose a single ruleset file
   --ruleset-name <name> Ruleset filename to search for (default: agent-ruleset.json)
-  --rules-root <path>   Override rules root directory for all rulesets (or set ${RULES_ROOT_ENV_VAR})
+  --refresh             Refresh cached remote rules
+  --clear-cache         Remove cached remote rules and exit
 `;
 
 const parseArgs = (argv: string[]): CliArgs => {
@@ -92,13 +93,13 @@ const parseArgs = (argv: string[]): CliArgs => {
       continue;
     }
 
-    if (arg === "--rules-root") {
-      const value = argv[i + 1];
-      if (!value) {
-        throw new Error("Missing value for --rules-root");
-      }
-      args.rulesRoot = value;
-      i += 1;
+    if (arg === "--refresh") {
+      args.refresh = true;
+      continue;
+    }
+
+    if (arg === "--clear-cache") {
+      args.clearCache = true;
       continue;
     }
 
@@ -138,6 +139,12 @@ const resolveFrom = (baseDir: string, targetPath: string): string => {
   return path.resolve(baseDir, targetPath);
 };
 
+const clearCache = (): void => {
+  if (fs.existsSync(DEFAULT_CACHE_ROOT)) {
+    fs.rmSync(DEFAULT_CACHE_ROOT, { recursive: true, force: true });
+  }
+};
+
 const ensureFileExists = (filePath: string): void => {
   if (!fs.existsSync(filePath)) {
     throw new Error(`Missing file: ${filePath}`);
@@ -161,12 +168,11 @@ const readJsonFile = (filePath: string): unknown => {
 };
 
 type ProjectRuleset = {
-  output?: string;
+  source: string;
+  global?: boolean;
   domains?: string[];
-  rules?: string[];
-  rulesRoot?: string;
-  globalDir?: string;
-  domainsDir?: string;
+  extra?: string[];
+  output?: string;
 };
 
 const readProjectRuleset = (rulesetPath: string): ProjectRuleset => {
@@ -181,47 +187,18 @@ const readProjectRuleset = (rulesetPath: string): ProjectRuleset => {
   if (ruleset.output === undefined) {
     ruleset.output = DEFAULT_OUTPUT;
   }
+  if (ruleset.global === undefined) {
+    ruleset.global = true;
+  }
 
   return ruleset;
 };
 
-type RulesRootOptions = {
-  cliRulesRoot?: string;
-};
-
-const resolveRulesRoot = (
-  rulesetDir: string,
-  projectRuleset: ProjectRuleset,
-  options: RulesRootOptions
-): string => {
-  if (isNonEmptyString(options.cliRulesRoot)) {
-    return resolveFrom(rulesetDir, options.cliRulesRoot);
-  }
-
-  const envRulesRoot = process.env[RULES_ROOT_ENV_VAR];
-  if (isNonEmptyString(envRulesRoot)) {
-    return resolveFrom(rulesetDir, envRulesRoot);
-  }
-
-  if (isNonEmptyString(projectRuleset.rulesRoot)) {
-    return resolveFrom(rulesetDir, projectRuleset.rulesRoot);
-  }
-
-  return path.resolve(rulesetDir, DEFAULT_RULES_ROOT);
-};
-
-const resolveGlobalRoot = (rulesRoot: string, projectRuleset: ProjectRuleset): string => {
-  const globalDirName = isNonEmptyString(projectRuleset.globalDir)
-    ? projectRuleset.globalDir
-    : DEFAULT_GLOBAL_DIR;
-  return path.resolve(rulesRoot, globalDirName);
-};
-
-const resolveDomainsRoot = (rulesRoot: string, projectRuleset: ProjectRuleset): string => {
-  const domainsDirName = isNonEmptyString(projectRuleset.domainsDir)
-    ? projectRuleset.domainsDir
-    : DEFAULT_DOMAINS_DIR;
-  return path.resolve(rulesRoot, domainsDirName);
+type GithubSource = {
+  owner: string;
+  repo: string;
+  ref: string;
+  url: string;
 };
 
 const collectMarkdownFiles = (rootDir: string): string[] => {
@@ -272,7 +249,194 @@ const addRulePaths = (rulePaths: string[], resolvedRules: string[], seenRules: S
 };
 
 type ComposeOptions = {
-  cliRulesRoot?: string;
+  refresh?: boolean;
+};
+
+const sanitizeCacheSegment = (value: string): string => value.replace(/[\\/]/gu, "__");
+const looksLikeCommitHash = (value: string): boolean => /^[a-f0-9]{7,40}$/iu.test(value);
+
+const execGit = (args: string[], cwd?: string): string =>
+  execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+
+const parseGithubSource = (source: string): GithubSource => {
+  const trimmed = source.trim();
+  if (!trimmed.startsWith("github:")) {
+    throw new Error(`Unsupported source: ${source}`);
+  }
+
+  const withoutPrefix = trimmed.slice("github:".length);
+  const [repoPart, refPart] = withoutPrefix.split("@");
+  const [owner, repo] = repoPart.split("/");
+
+  if (!isNonEmptyString(owner) || !isNonEmptyString(repo)) {
+    throw new Error(`Invalid GitHub source (expected github:owner/repo@ref): ${source}`);
+  }
+
+  const ref = isNonEmptyString(refPart) ? refPart : "latest";
+  return { owner, repo, ref, url: `https://github.com/${owner}/${repo}.git` };
+};
+
+const parseSemver = (tag: string): number[] | null => {
+  const cleaned = tag.startsWith("v") ? tag.slice(1) : tag;
+  const parts = cleaned.split(".");
+  if (parts.length < 2 || parts.length > 3) {
+    return null;
+  }
+
+  const numbers = parts.map((part) => Number(part));
+  if (numbers.some((value) => Number.isNaN(value))) {
+    return null;
+  }
+
+  return numbers;
+};
+
+const compareSemver = (a: number[], b: number[]): number => {
+  const maxLength = Math.max(a.length, b.length);
+  for (let i = 0; i < maxLength; i += 1) {
+    const left = a[i] ?? 0;
+    const right = b[i] ?? 0;
+    if (left !== right) {
+      return left - right;
+    }
+  }
+  return 0;
+};
+
+const resolveLatestTag = (repoUrl: string): { tag?: string; hash?: string } => {
+  const raw = execGit(["ls-remote", "--tags", "--refs", repoUrl]);
+  if (!raw) {
+    return {};
+  }
+
+  const candidates = raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [hash, ref] = line.split(/\s+/u);
+      const tag = ref?.replace("refs/tags/", "");
+      if (!hash || !tag) {
+        return null;
+      }
+      const semver = parseSemver(tag);
+      if (!semver) {
+        return null;
+      }
+      return { hash, tag, semver };
+    })
+    .filter((item): item is { hash: string; tag: string; semver: number[] } => Boolean(item));
+
+  if (candidates.length === 0) {
+    return {};
+  }
+
+  candidates.sort((a, b) => compareSemver(a.semver, b.semver));
+  const latest = candidates[candidates.length - 1];
+  return { tag: latest.tag, hash: latest.hash };
+};
+
+const resolveHeadHash = (repoUrl: string): string => {
+  const raw = execGit(["ls-remote", repoUrl, "HEAD"]);
+  const [hash] = raw.split(/\s+/u);
+  if (!hash) {
+    throw new Error(`Unable to resolve HEAD for ${repoUrl}`);
+  }
+  return hash;
+};
+
+const resolveRefHash = (repoUrl: string, ref: string): string | null => {
+  const raw = execGit(["ls-remote", repoUrl, ref, `refs/tags/${ref}`, `refs/heads/${ref}`]);
+  if (!raw) {
+    return null;
+  }
+  const [hash] = raw.split(/\s+/u);
+  return hash ?? null;
+};
+
+const ensureDir = (dirPath: string): void => {
+  fs.mkdirSync(dirPath, { recursive: true });
+};
+
+const cloneAtRef = (repoUrl: string, ref: string, destination: string): void => {
+  execGit(["clone", "--depth", "1", "--branch", ref, repoUrl, destination]);
+};
+
+const fetchCommit = (repoUrl: string, commitHash: string, destination: string): void => {
+  ensureDir(destination);
+  execGit(["init"], destination);
+  execGit(["remote", "add", "origin", repoUrl], destination);
+  execGit(["fetch", "--depth", "1", "origin", commitHash], destination);
+  execGit(["checkout", "FETCH_HEAD"], destination);
+};
+
+const resolveGithubRulesRoot = (
+  source: string,
+  refresh: boolean
+): { rulesRoot: string; resolvedRef: string } => {
+  const parsed = parseGithubSource(source);
+  const resolved = parsed.ref === "latest" ? resolveLatestTag(parsed.url) : null;
+  const resolvedRef = resolved?.tag ?? (parsed.ref === "latest" ? "HEAD" : parsed.ref);
+  const resolvedHash =
+    resolved?.hash ??
+    (resolvedRef === "HEAD"
+      ? resolveHeadHash(parsed.url)
+      : resolveRefHash(parsed.url, resolvedRef));
+
+  if (!resolvedHash && !looksLikeCommitHash(resolvedRef)) {
+    throw new Error(`Unable to resolve ref ${resolvedRef} for ${parsed.url}`);
+  }
+
+  const cacheSegment =
+    resolvedRef === "HEAD" ? sanitizeCacheSegment(resolvedHash ?? resolvedRef) : sanitizeCacheSegment(resolvedRef);
+  const cacheDir = path.join(DEFAULT_CACHE_ROOT, parsed.owner, parsed.repo, cacheSegment);
+
+  if (refresh && fs.existsSync(cacheDir)) {
+    fs.rmSync(cacheDir, { recursive: true, force: true });
+  }
+
+  if (!fs.existsSync(cacheDir)) {
+    ensureDir(path.dirname(cacheDir));
+    try {
+      cloneAtRef(parsed.url, resolvedRef, cacheDir);
+    } catch (error) {
+      if (resolvedHash && looksLikeCommitHash(resolvedHash)) {
+        fetchCommit(parsed.url, resolvedHash, cacheDir);
+      } else if (looksLikeCommitHash(resolvedRef)) {
+        fetchCommit(parsed.url, resolvedRef, cacheDir);
+      } else {
+        throw error;
+      }
+    }
+  }
+
+  const rulesRoot = path.join(cacheDir, "rules");
+  ensureDirectoryExists(rulesRoot);
+
+  return { rulesRoot, resolvedRef };
+};
+
+const resolveLocalRulesRoot = (rulesetDir: string, source: string): string => {
+  const resolvedSource = resolveFrom(rulesetDir, source);
+  if (!fs.existsSync(resolvedSource)) {
+    throw new Error(`Missing source path: ${resolvedSource}`);
+  }
+
+  const candidate = path.basename(resolvedSource) === "rules" ? resolvedSource : path.join(resolvedSource, "rules");
+  ensureDirectoryExists(candidate);
+  return candidate;
+};
+
+const resolveRulesRoot = (
+  rulesetDir: string,
+  source: string,
+  refresh: boolean
+): { rulesRoot: string; resolvedRef?: string } => {
+  if (source.startsWith("github:")) {
+    return resolveGithubRulesRoot(source, refresh);
+  }
+
+  return { rulesRoot: resolveLocalRulesRoot(rulesetDir, source) };
 };
 
 const composeRuleset = (rulesetPath: string, rootDir: string, options: ComposeOptions): string => {
@@ -281,17 +445,16 @@ const composeRuleset = (rulesetPath: string, rootDir: string, options: ComposeOp
   const outputFileName = projectRuleset.output ?? DEFAULT_OUTPUT;
   const outputPath = resolveFrom(rulesetDir, outputFileName);
 
-  const rulesRoot = resolveRulesRoot(rulesetDir, projectRuleset, {
-    cliRulesRoot: options.cliRulesRoot
-  });
-  const globalRoot = resolveGlobalRoot(rulesRoot, projectRuleset);
-  const domainsRoot = resolveDomainsRoot(rulesRoot, projectRuleset);
+  const { rulesRoot } = resolveRulesRoot(rulesetDir, projectRuleset.source, options.refresh ?? false);
+  const globalRoot = path.join(rulesRoot, "global");
+  const domainsRoot = path.join(rulesRoot, "domains");
 
   const resolvedRules: string[] = [];
   const seenRules = new Set<string>();
 
-  // Global rules always apply.
-  addRulePaths(collectMarkdownFiles(globalRoot), resolvedRules, seenRules);
+  if (projectRuleset.global !== false) {
+    addRulePaths(collectMarkdownFiles(globalRoot), resolvedRules, seenRules);
+  }
 
   const domains = Array.isArray(projectRuleset.domains) ? projectRuleset.domains : [];
   for (const domain of domains) {
@@ -299,8 +462,8 @@ const composeRuleset = (rulesetPath: string, rootDir: string, options: ComposeOp
     addRulePaths(collectMarkdownFiles(domainRoot), resolvedRules, seenRules);
   }
 
-  const directRules = Array.isArray(projectRuleset.rules) ? projectRuleset.rules : [];
-  const directRulePaths = directRules.map((rulePath) => resolveFrom(rulesetDir, rulePath));
+  const extraRules = Array.isArray(projectRuleset.extra) ? projectRuleset.extra : [];
+  const directRulePaths = extraRules.map((rulePath) => resolveFrom(rulesetDir, rulePath));
   addRulePaths(directRulePaths, resolvedRules, seenRules);
 
   const parts = resolvedRules.map((rulePath) =>
@@ -367,6 +530,12 @@ const main = (): void => {
     return;
   }
 
+  if (args.clearCache) {
+    clearCache();
+    process.stdout.write("Cache cleared.\n");
+    return;
+  }
+
   const rootDir = args.root ? path.resolve(args.root) : process.cwd();
   const rulesetName = args.rulesetName || DEFAULT_RULESET_NAME;
   const rulesetFiles = getRulesetFiles(rootDir, args.ruleset, rulesetName);
@@ -377,7 +546,7 @@ const main = (): void => {
 
   const outputs = rulesetFiles
     .sort()
-    .map((rulesetPath) => composeRuleset(rulesetPath, rootDir, { cliRulesRoot: args.rulesRoot }));
+    .map((rulesetPath) => composeRuleset(rulesetPath, rootDir, { refresh: args.refresh }));
 
   process.stdout.write(`Composed AGENTS.md:\n${outputs.map((file) => `- ${file}`).join("\n")}\n`);
 };

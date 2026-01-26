@@ -3,7 +3,15 @@
   "title": "Compose AGENTS.md ruleset",
   "type": "object",
   "additionalProperties": false,
+  "required": ["source"],
   "properties": {
+    "source": {
+      "type": "string",
+      "minLength": 1
+    },
+    "global": {
+      "type": "boolean"
+    },
     "output": {
       "type": "string",
       "minLength": 1
@@ -15,24 +23,12 @@
         "minLength": 1
       }
     },
-    "rules": {
+    "extra": {
       "type": "array",
       "items": {
         "type": "string",
         "minLength": 1
       }
-    },
-    "rulesRoot": {
-      "type": "string",
-      "minLength": 1
-    },
-    "globalDir": {
-      "type": "string",
-      "minLength": 1
-    },
-    "domainsDir": {
-      "type": "string",
-      "minLength": 1
     }
   }
 }
