@@ -3,6 +3,7 @@
 - Before starting any work, run `compose-agentsmd` from the project root.
 - To update shared rules, run `compose-agentsmd edit-rules`, edit the workspace rules, then run `compose-agentsmd apply-rules`.
 - Do not edit `AGENTS.md` directly; update the source rules and regenerate.
+- When updating rules, include a detailed summary of what changed (added/removed/modified items) in the final response.
 
 # AGENTS ルール運用（合成）
 
@@ -50,6 +51,7 @@
 
 - ユーザーが明示しない限り、コマンドにラッパーやパイプを付加しない。
 - ビルド/テスト/実行は、各リポジトリの標準スクリプト/手順（`package.json`、README等）を優先する。
+- When running git commands that could open an editor, avoid interactive prompts by using `--no-edit` where applicable or setting `GIT_EDITOR=true` for that command.
 
 # 配布と公開
 
