@@ -207,13 +207,13 @@ Write final responses to the user in Japanese unless the user requests otherwise
 - ログは冗長にしないが、原因特定に必要なコンテキスト（識別子や入力条件）を含める。
 - 秘密情報/個人情報をログに出さない（必要ならマスク/分離する）。
 
-## ドキュメント（README）
+## Documentation (README)
 
-- すべてのリポジトリ（モジュール）に `README.md` を置く。
-- README には最低限として、概要/目的、セットアップ、開発コマンド（例: build/test/lint）、必要な環境変数/設定、公開/デプロイ手順（該当する場合）を書く。
-- ソースコード変更時は、README へ影響がないかを必ず確認する。影響がある場合は同一変更セット内で README を更新する（必須）。
-  - 影響例: 使い方/API/挙動、セットアップ手順、開発コマンド、環境変数、設定、公開/デプロイ手順、対応バージョン、破壊的変更。
-  - README 更新が不要な場合でも、「なぜ不要か」を最終返答に明記する（独断でスキップしない）。
+- Every repository (module) must include a `README.md`.
+- At minimum, the README must cover overview/purpose, setup, development commands (e.g., build/test/lint), required environment variables/config, and release/deploy steps (if applicable).
+- For any source code change, always check whether the README is affected. If it is, update the README at the same time as the code changes (do not defer it to a later step).
+  - Impact examples: usage/API/behavior, setup steps, dev commands, environment variables, configuration, release/deploy steps, supported versions, breaking changes.
+  - Even when a README update is not needed, explain why in the final response (do not skip silently).
 
 # 生成物
 
