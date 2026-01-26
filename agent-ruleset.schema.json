@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Compose AGENTS.md ruleset",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "output": {
+      "type": "string",
+      "minLength": 1
+    },
+    "domains": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "rulesRoot": {
+      "type": "string",
+      "minLength": 1
+    },
+    "globalDir": {
+      "type": "string",
+      "minLength": 1
+    },
+    "domainsDir": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

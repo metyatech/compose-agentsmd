@@ -11,6 +11,12 @@ const __dirname = path.dirname(__filename);
 
 const repoRoot = path.resolve(__dirname, "..");
 const cliPath = path.join(repoRoot, "dist", "compose-agents.js");
+const TOOL_RULES = [
+  "# Tool Rules (compose-agentsmd)",
+  "- Before starting any work, run `compose-agentsmd` from the project root.",
+  "- To update rules, update the source rule modules or ruleset, then rerun `compose-agentsmd`.",
+  "- Do not edit `AGENTS.md` directly; update the source rules and regenerate."
+].join("\n");
 
 const writeFile = (filePath, content) => {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -61,6 +67,8 @@ const runCli = (args, options) =>
   });
 
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+const withToolRules = (body) =>
+  `<!-- markdownlint-disable MD025 -->\n${TOOL_RULES}\n\n${body}`;
 
 test("composes AGENTS.md using --rules-root override", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
@@ -94,8 +102,7 @@ test("composes AGENTS.md using --rules-root override", () => {
     const outputPath = path.join(projectRoot, "AGENTS.md");
     const output = fs.readFileSync(outputPath, "utf8");
 
-    const expected =
-      "<!-- markdownlint-disable MD025 -->\n# Global A\nA\n\n# Global B\nB\n\n# Domain C\nC\n\n# Custom\nlocal\n";
+    const expected = withToolRules("# Global A\nA\n\n# Global B\nB\n\n# Domain C\nC\n\n# Custom\nlocal\n");
 
     assert.equal(output, expected);
   } finally {
@@ -142,7 +149,7 @@ test("supports AGENT_RULES_ROOT environment override", () => {
     });
 
     const output = fs.readFileSync(path.join(projectRoot, "AGENTS.md"), "utf8");
-    assert.equal(output, "<!-- markdownlint-disable MD025 -->\n# Only Global\n1\n");
+    assert.equal(output, withToolRules("# Only Global\n1\n"));
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
@@ -173,7 +180,7 @@ test("uses rulesRoot from ruleset when CLI and env overrides are absent", () => 
     runCli(["--root", projectRoot], { cwd: repoRoot });
 
     const output = fs.readFileSync(path.join(projectRoot, "AGENTS.md"), "utf8");
-    assert.equal(output, "<!-- markdownlint-disable MD025 -->\n# Ruleset Root\nruleset\n");
+    assert.equal(output, withToolRules("# Ruleset Root\nruleset\n"));
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
@@ -211,7 +218,7 @@ test("CLI --rules-root takes precedence over AGENT_RULES_ROOT and ruleset rulesR
     });
 
     const output = fs.readFileSync(path.join(projectRoot, "AGENTS.md"), "utf8");
-    assert.equal(output, "<!-- markdownlint-disable MD025 -->\n# CLI Root\ncli\n");
+    assert.equal(output, withToolRules("# CLI Root\ncli\n"));
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
@@ -245,8 +252,7 @@ test("supports globalDir and domainsDir overrides", () => {
     runCli(["--root", projectRoot], { cwd: repoRoot });
 
     const output = fs.readFileSync(path.join(projectRoot, "AGENTS.md"), "utf8");
-    const expected =
-      "<!-- markdownlint-disable MD025 -->\n# Global Override\nG\n\n# Domain Override\nD\n";
+    const expected = withToolRules("# Global Override\nG\n\n# Domain Override\nD\n");
     assert.equal(output, expected);
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -274,7 +280,7 @@ test("rejects invalid ruleset shapes with a clear error", () => {
 
     assert.throws(
       () => runCli(["--root", projectRoot], { cwd: repoRoot }),
-      /Invalid ruleset output|"domains" entries must be non-empty strings|"rules" entries must be non-empty strings/u
+      /Invalid ruleset schema .*\/output/u
     );
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -313,6 +319,7 @@ test("composes using default agent-rules submodule layout", () => {
     const outputPath = path.join(projectRoot, "AGENTS.md");
     const output = fs.readFileSync(outputPath, "utf8");
     assert.match(output, /^<!-- markdownlint-disable MD025 -->\n/u);
+    assert.match(output, new RegExp(escapeRegExp(TOOL_RULES), "u"));
 
     const globalFiles = collectMarkdownFiles(path.join(projectRulesRoot, "global"));
     const firstGlobal = normalizeTrailingWhitespace(fs.readFileSync(globalFiles[0], "utf8"));

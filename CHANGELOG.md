@@ -8,3 +8,8 @@ All notable changes to this project will be documented in this file.
 - Expanded test coverage for rules root precedence and ruleset validation.
 - Added GitHub community health files and CI workflow.
 - Regenerated `AGENTS.md` from the updated rule modules.
+
+## 1.1.0 - 2026-01-26
+- Added JSON Schema validation for rulesets with an explicit schema file.
+- Prepended tool guidance rules to generated `AGENTS.md` files.
+- Updated shared rule modules for JSON schema validation and English rule writing guidance.

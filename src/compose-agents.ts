@@ -2,6 +2,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { Ajv, type ErrorObject } from "ajv";
 
 const DEFAULT_RULESET_NAME = "agent-ruleset.json";
 const DEFAULT_RULES_ROOT = "agent-rules/rules";
@@ -9,6 +10,13 @@ const DEFAULT_GLOBAL_DIR = "global";
 const DEFAULT_DOMAINS_DIR = "domains";
 const RULES_ROOT_ENV_VAR = "AGENT_RULES_ROOT";
 const DEFAULT_OUTPUT = "AGENTS.md";
+const RULESET_SCHEMA_PATH = new URL("../agent-ruleset.schema.json", import.meta.url);
+const TOOL_RULES = [
+  "# Tool Rules (compose-agentsmd)",
+  "- Before starting any work, run `compose-agentsmd` from the project root.",
+  "- To update rules, update the source rule modules or ruleset, then rerun `compose-agentsmd`.",
+  "- Do not edit `AGENTS.md` directly; update the source rules and regenerate."
+].join("\n");
 
 const DEFAULT_IGNORE_DIRS = new Set([
   ".git",
@@ -105,6 +113,23 @@ const normalizePath = (filePath: string): string => filePath.replace(/\\/g, "/")
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === "string" && value.trim() !== "";
 
+const rulesetSchema = JSON.parse(fs.readFileSync(RULESET_SCHEMA_PATH, "utf8"));
+const ajv = new Ajv({ allErrors: true, strict: false });
+const validateRulesetSchema = ajv.compile(rulesetSchema);
+
+const formatSchemaErrors = (errors: ErrorObject[] | null | undefined): string => {
+  if (!errors || errors.length === 0) {
+    return "Unknown schema validation error";
+  }
+
+  return errors
+    .map((error) => {
+      const pathLabel = error.instancePath ? error.instancePath : "(root)";
+      return `${pathLabel} ${error.message ?? "is invalid"}`;
+    })
+    .join("; ");
+};
+
 const resolveFrom = (baseDir: string, targetPath: string): string => {
   if (path.isAbsolute(targetPath)) {
     return targetPath;
@@ -145,39 +170,19 @@ type ProjectRuleset = {
 };
 
 const readProjectRuleset = (rulesetPath: string): ProjectRuleset => {
-  const parsed = readJsonFile(rulesetPath) as ProjectRuleset;
-
-  if (parsed.output === undefined) {
-    parsed.output = DEFAULT_OUTPUT;
-  } else if (!isNonEmptyString(parsed.output)) {
-    throw new Error(`Invalid ruleset output in ${rulesetPath}`);
+  const parsed = readJsonFile(rulesetPath);
+  const isValid = validateRulesetSchema(parsed);
+  if (!isValid) {
+    const message = formatSchemaErrors(validateRulesetSchema.errors);
+    throw new Error(`Invalid ruleset schema in ${rulesetPath}: ${message}`);
   }
 
-  if (parsed.domains !== undefined) {
-    if (!Array.isArray(parsed.domains)) {
-      throw new Error(`"domains" must be an array in ${rulesetPath}`);
-    }
-
-    for (const domain of parsed.domains) {
-      if (!isNonEmptyString(domain)) {
-        throw new Error(`"domains" entries must be non-empty strings in ${rulesetPath}`);
-      }
-    }
+  const ruleset = parsed as ProjectRuleset;
+  if (ruleset.output === undefined) {
+    ruleset.output = DEFAULT_OUTPUT;
   }
 
-  if (parsed.rules !== undefined) {
-    if (!Array.isArray(parsed.rules)) {
-      throw new Error(`"rules" must be an array in ${rulesetPath}`);
-    }
-
-    for (const rule of parsed.rules) {
-      if (!isNonEmptyString(rule)) {
-        throw new Error(`"rules" entries must be non-empty strings in ${rulesetPath}`);
-      }
-    }
-  }
-
-  return parsed;
+  return ruleset;
 };
 
 type RulesRootOptions = {
@@ -303,7 +308,8 @@ const composeRuleset = (rulesetPath: string, rootDir: string, options: ComposeOp
   );
 
   const lintHeader = "<!-- markdownlint-disable MD025 -->";
-  const output = `${lintHeader}\n${parts.join("\n\n")}\n`;
+  const toolRules = normalizeTrailingWhitespace(TOOL_RULES);
+  const output = `${lintHeader}\n${[toolRules, ...parts].join("\n\n")}\n`;
 
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, output, "utf8");

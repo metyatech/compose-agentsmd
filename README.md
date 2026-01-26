@@ -45,6 +45,8 @@ compose-agentsmd
 
 The tool searches for `agent-ruleset.json` under the given root directory (default: current working directory), and writes output files as specified by each ruleset. If `output` is omitted, it defaults to `AGENTS.md`.
 
+The tool prepends a small "Tool Rules" block to every generated `AGENTS.md` so agents know how to regenerate or update rules.
+
 ### Rules root resolution (important for global installs)
 
 When installed globally, the rules directory is usually outside the project. You can point to it in either of the following ways:
@@ -81,6 +83,10 @@ Rules root resolution precedence is:
 - `output` is optional; when omitted, `AGENTS.md` is used.
 - `domains` selects domain folders under `agent-rules/rules/domains`.
 - `rules` is optional and appends additional rule files.
+
+### Ruleset schema validation
+
+`compose-agentsmd` validates rulesets against `agent-ruleset.schema.json` on every run. If the ruleset does not conform to the schema, the tool exits with a schema error.
 
 Optional path overrides:
 

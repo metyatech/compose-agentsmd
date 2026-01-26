@@ -1,4 +1,9 @@
 <!-- markdownlint-disable MD025 -->
+# Tool Rules (compose-agentsmd)
+- Before starting any work, run `compose-agentsmd` from the project root.
+- To update rules, update the source rule modules or ruleset, then rerun `compose-agentsmd`.
+- Do not edit `AGENTS.md` directly; update the source rules and regenerate.
+
 # AGENTS ルール運用（合成）
 
 ## 対象範囲
@@ -72,6 +77,7 @@
 - ただし、目的と釣り合わない大改修や無関係な改善はしない。
 - 不明点や判断が分かれる点は、独断で進めず確認する。
 - 推測だけで判断して進めない。根拠が不足している場合は確認する。
+- 原因・根拠を未確認のまま「可能性が高い」などの推測で実装・修正しない。まず事実確認し、確認できない場合はユーザーに確認する。
 
 ### 意思決定の優先順位
 
@@ -96,19 +102,24 @@
 ## ドキュメント
 
 - 仕様・挙動・入出力・制約・既定値・順序・命名・生成条件・上書き有無など、仕様に関わる内容は詳細かつ網羅的に記述する（要約だけにしない）。
+- 実装を変更して仕様に影響がある場合は、同一変更セットで仕様書（例: `docs/`）も更新する。仕様書の更新が不要な場合でも、最終返答でその理由を明記する。
 - Markdown ドキュメントの例は、テストケースのファイルで十分に示せる場合はテストケースを参照する。十分でない場合は、その例をテストケース化できるか検討し、可能ならテスト化して参照する。どちらも不適切な場合のみドキュメント内に例を記載する。
+
+# JSON schema validation
+
+- When defining or changing a JSON configuration specification, always create or update a JSON Schema for it.
+- Validate JSON configuration files against the schema as part of the tool's normal execution.
 
 # Languages and writing
 
-## 言語（返答・記述）
+## Response language
 
-### 回答言語
+Write final responses to the user in Japanese unless the user requests otherwise.
 
-ユーザーへの最終返答は日本語で書く（ユーザーから別の希望がある場合はそちらを優先）。
+## Writing language
 
-### 記述言語
-
-- 特に指定がない限り、開発者向けドキュメント（例: `README.md`）、コードコメント、コミットメッセージは英語で書く。
+- Unless specified otherwise, write developer-facing documentation (e.g., `README.md`), code comments, and commit messages in English.
+- Write rule modules in English.
 
 # Markdown Linking Rules
 
@@ -147,6 +158,8 @@
 
 - 変更に関連する最小範囲のビルド/テスト/静的解析を実行する。
 - 実行方法は各リポジトリが用意しているスクリプト/コマンドを優先する（例: `npm run build`, `npm test`）。
+- 静的解析（lint / 型チェック / 静的検証）は必須とし、対象リポジトリに未整備なら同一変更セット内で追加する（必須）。
+- 追加時はまず依存追加なしの最小構成を優先する（例: TypeScript は `tsc --noEmit`）。新規依存が必要な場合は候補と影響範囲を提示し、ユーザー確認後に追加する。
 - 実行できない場合は、その理由と、ユーザーが実行するコマンドを明記する。
 
 ## テスト
