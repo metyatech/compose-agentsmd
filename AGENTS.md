@@ -77,6 +77,7 @@
 - GitHub Releases を作成し、本文は `CHANGELOG.md` の該当バージョンを基準に記述する。
 - バージョンは `package.json`（等の管理対象）と Git タグの間で不整合を起こさない。
 - When bumping a version, always create the GitHub Release and publish the package (e.g., npm) as part of the same update.
+- For npm publishing, ask the user to run `npm publish` (or provide OTP) instead of executing it directly.
 
 ## 実装・技術選定
 
@@ -247,10 +248,6 @@ Write final responses to the user in Japanese unless the user requests otherwise
 # Naming consistency
 
 - 命名規則（大文字小文字、略語、区切り方）をリポジトリ内で一貫させ、混在があれば整合するようにリネームする。
-
-# Rule update transparency
-
-- When updating rules, summarize what changed in the rules (added/removed/modified items) in the final response.
 
 ## Module system (ESM)
 
