@@ -24,3 +24,6 @@ All notable changes to this project will be documented in this file.
 - Switched ruleset format to `source/global/domains/extra` with remote GitHub sources and cache support in `~/.agentsmd`.
 - Added `--refresh` and `--clear-cache` cache management commands.
 - Updated ruleset schema, tests, and README to match the new format.
+
+## 2.0.1 - 2026-01-26
+- Moved the publish/global-update rule into local rules for this repository.
