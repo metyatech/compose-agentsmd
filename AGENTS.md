@@ -67,6 +67,7 @@
 - GitHub Releases を作成し、本文は `CHANGELOG.md` の該当バージョンを基準に記述する。
 - バージョンは `package.json`（等の管理対象）と Git タグの間で不整合を起こさない。
 - When bumping a version, always create the GitHub Release and publish the package (e.g., npm) as part of the same update.
+- After publishing this repository, update the globally installed CLI to the latest version.
 
 ## 実装・技術選定
 
