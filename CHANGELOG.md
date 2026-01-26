@@ -16,3 +16,6 @@ All notable changes to this project will be documented in this file.
 
 ## 1.1.1 - 2026-01-26
 - Clarified that README updates must be edited at the same time as code changes in shared rules.
+
+## 1.1.2 - 2026-01-26
+- Clarified that version bumps must include both release creation and package publishing.
