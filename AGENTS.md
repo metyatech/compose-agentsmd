@@ -24,7 +24,7 @@
 - ユーザーが「必ず」「つねに」などの強い必須指定を含む指示を出した場合は、その指示がグローバルかプロジェクト固有かを判断し、適切なモジュールに追記して再生成する。
 - When updating rules, infer the core intent; if it represents a global policy, record it in global rules rather than project-local rules.
 - When you acknowledge a new persistent instruction, update the appropriate rule module in the same change set and regenerate `AGENTS.md`.
-- When updating rules, include a colorized diff-style summary in the final response; prefer `git diff --color=always` when available.
+- When updating rules, include a colorized diff-style summary in the final response; prefer `git diff --color=always` when available. Exclude `AGENTS.md` from the diff output.
 - Always include raw ANSI escape codes in diff outputs (e.g., paste the direct output of `git diff --color=always` without sanitizing or reformatting) so the response renders with colors in compatible UIs.
 
 ## ルール修正時の注意点
@@ -100,11 +100,13 @@
 - JavaScript は、ツール都合で必要な設定ファイル等に限定する。
 - 外部依存で汎用的な解決ができる場合は積極的に採用する。内製は外部依存が適切に見つからない場合のみに限定する。
 - 対象ツール/フレームワークに公式チュートリアルや推奨される標準手法がある場合は、それを第一優先で採用する（明確な理由がある場合を除く）。
+- Use established icon libraries instead of creating custom icons or inline SVGs; do not handcraft new icons.
 - Prefer existing internet-hosted tools/libraries for reusable functionality; if none exist, externalize the shared logic into a separate repository/module and reference it via remote dependency (never local filesystem paths).
 - When building a feature that appears reusable across repositories or generally useful, explicitly assess reuse first: look for existing solutions, and if none fit, propose creating a new repository/module and publishing it with proper maintenance hygiene instead of embedding the logic in a single repo.
 - 「既存に合わせる」よりも「理想的な状態（読みやすさ・保守性・一貫性・安全性）」を優先する。
 - ただし、目的と釣り合わない大改修や無関係な改善はしない。
 - 根本原因を修正できる場合は、場当たり的なフォールバックや回避策を追加しない（ノイズ/負債化するため）。
+- When a bug originates in a dependency you control or can patch, fix the dependency first; only add app-level workarounds as a last resort after documenting why the dependency fix is not feasible.
 - 不明点や判断が分かれる点は、独断で進めず確認する。
 - 推測だけで判断して進めない。根拠が不足している場合は確認する。
 - 原因・根拠を未確認のまま「可能性が高い」などの推測で実装・修正しない。まず事実確認し、確認できない場合はユーザーに確認する。
@@ -117,6 +119,7 @@
 ## 設計・実装の原則（共通）
 
 - 責務を小さく保ち、関心を分離する（単一責任）。
+- ツールやモジュールの責務は狭く定義し、用途が曖昧になる広い責務設計を避ける。
 - 依存関係の方向を意識し、差し替えが必要な箇所は境界を分離する（抽象化/インターフェース等）。
 - 継承より合成を優先し、差分を局所化する（過度な階層化を避ける）。
 - グローバルな共有可変状態を増やさない（所有者と寿命が明確な場所へ閉じ込める）。

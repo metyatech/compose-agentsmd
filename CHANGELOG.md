@@ -2,6 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
+## 3.2.1 - 2026-01-27
+- Regenerated `AGENTS.md` to exclude the `AGENTS.md` file from rule diff output.
+
 ## 1.0.1 - 2026-01-25
 - Switched the package to ESM (`"type": "module"`, NodeNext compiler options).
 - Hardened npm publish settings (`publishConfig.access`, `files`, `prepare`).
