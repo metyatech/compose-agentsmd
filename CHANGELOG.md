@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## 3.2.2 - 2026-02-01
+- Normalized AGENTS.md Source paths to GitHub-style refs for remote rules and project-relative paths for local rules, with matching test updates.
+- Added a pre-commit hook to run lint/test/build.
+- Updated the ruleset to use `github:metyatech/agent-rules` with `cli`/`release` domains, removing the local release extra and regenerating AGENTS.md with the shared rules.
+- Clarified tool rules location and rule-update diff requirements, and switched this repo to generate rules via `npm run compose`.
+- Bumped @types/node to ^25.1.0.
+
 ## 3.2.1 - 2026-01-27
 - Regenerated `AGENTS.md` to exclude the `AGENTS.md` file from rule diff output.
 
