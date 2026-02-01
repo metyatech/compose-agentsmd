@@ -5,5 +5,8 @@
     "node",
     "release"
   ],
+  "extra": [
+    "agent-rules-local/compose-agentsmd-local.md"
+  ],
   "output": "AGENTS.md"
 }

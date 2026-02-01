@@ -1,6 +1,6 @@
 <!-- markdownlint-disable MD025 -->
 # Tool Rules (compose-agentsmd)
-- Before starting any work, run `npm run compose` from the project root.
+- Before starting any work, run `compose-agentsmd` from the project root.
 - To update shared rules, run `compose-agentsmd edit-rules`, edit the workspace rules, then run `compose-agentsmd apply-rules`.
 - Do not edit `AGENTS.md` directly; update the source rules and regenerate.
 - These tool rules live in tools/tool-rules.md in the compose-agentsmd repository; do not duplicate them in global rule modules.
@@ -220,3 +220,9 @@ Source: github:metyatech/agent-rules@HEAD/rules/domains/release/release-and-publ
 - Populate package metadata (name, description, repository, issues, homepage, engines).
 - Validate executable entrypoints and required shebangs so installed commands work.
 - If a repo represents a single tool/product, publish a single package (bundle related scripts).
+
+Source: agent-rules-local/compose-agentsmd-local.md
+
+# Compose-Agentsmd Local Overrides
+
+- For this repository only, generate AGENTS.md using `npm run compose` (do not run `compose-agentsmd` directly).
