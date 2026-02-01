@@ -1,6 +1,6 @@
 {
   "name": "compose-agentsmd",
-  "version": "3.2.1",
+  "version": "3.2.2",
   "description": "CLI tools for composing per-project AGENTS.md files from modular rule sets",
   "license": "MIT",
   "repository": {

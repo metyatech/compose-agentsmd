@@ -2,6 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
+## 3.2.2 - 2026-02-01
+- Regenerated `AGENTS.md` from updated shared rules (CLI standards, release guidance, and path/DRY guidance).
+
 ## 3.2.1 - 2026-01-27
 - Regenerated `AGENTS.md` to exclude the `AGENTS.md` file from rule diff output.
 
