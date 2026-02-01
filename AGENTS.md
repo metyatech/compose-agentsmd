@@ -173,6 +173,8 @@ Source: github:metyatech/agent-rules@HEAD/rules/domains/node/npm-packages.md
 
 Source: agent-rules-local/release.md
 
-# Distribution and release
+## Published artifact requirements
 
-- After publishing this repository, update the globally installed CLI to the latest version.
+- Populate package metadata (name, description, repository, issues, homepage, engines).
+- Validate executable entrypoints and required shebangs so installed commands work.
+- If a repo represents a single tool/product, publish a single package (bundle related scripts).
