@@ -101,7 +101,10 @@ const runCli = (args, options) =>
     stdio: "pipe"
   });
 
-const formatRuleBlock = (rulePath, body) => `Source: ${normalizePath(rulePath)}\n\n${body}`;
+const formatRuleBlock = (rulePath, body, projectRoot) => {
+  const relativePath = normalizePath(path.relative(projectRoot, rulePath));
+  return `Source: ${relativePath}\n\n${body}`;
+};
 
 const withToolRules = (body) => `<!-- markdownlint-disable MD025 -->\n${TOOL_RULES}\n\n${body}`;
 
@@ -184,10 +187,10 @@ test("composes AGENTS.md using local source and extra rules", () => {
 
     const expected = withToolRules(
       [
-        formatRuleBlock(path.join(rulesRoot, "global", "a.md"), "# Global A\nA"),
-        formatRuleBlock(path.join(rulesRoot, "global", "b.md"), "# Global B\nB"),
-        formatRuleBlock(path.join(rulesRoot, "domains", "node", "c.md"), "# Domain C\nC"),
-        formatRuleBlock(path.join(projectRoot, "agent-rules-local", "custom.md"), "# Custom\nlocal")
+        formatRuleBlock(path.join(rulesRoot, "global", "a.md"), "# Global A\nA", projectRoot),
+        formatRuleBlock(path.join(rulesRoot, "global", "b.md"), "# Global B\nB", projectRoot),
+        formatRuleBlock(path.join(rulesRoot, "domains", "node", "c.md"), "# Domain C\nC", projectRoot),
+        formatRuleBlock(path.join(projectRoot, "agent-rules-local", "custom.md"), "# Custom\nlocal", projectRoot)
       ].join("\n\n") + "\n"
     );
 
@@ -266,7 +269,7 @@ test("supports global=false to skip global rules", () => {
     const output = fs.readFileSync(path.join(projectRoot, "AGENTS.md"), "utf8");
     assert.equal(
       output,
-      withToolRules(formatRuleBlock(path.join(rulesRoot, "domains", "node", "domain.md"), "# Domain\nD") + "\n")
+      withToolRules(formatRuleBlock(path.join(rulesRoot, "domains", "node", "domain.md"), "# Domain\nD", projectRoot) + "\n")
     );
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -301,7 +304,7 @@ test("supports source path pointing to a rules directory", () => {
     const output = fs.readFileSync(path.join(projectRoot, "AGENTS.md"), "utf8");
     assert.equal(
       output,
-      withToolRules(formatRuleBlock(path.join(rulesRoot, "global", "only.md"), "# Ruleset Root\nruleset") + "\n")
+      withToolRules(formatRuleBlock(path.join(rulesRoot, "global", "only.md"), "# Ruleset Root\nruleset", projectRoot) + "\n")
     );
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -334,7 +337,7 @@ test("accepts rulesets with comments", () => {
     const output = fs.readFileSync(path.join(projectRoot, "AGENTS.md"), "utf8");
     assert.equal(
       output,
-      withToolRules(formatRuleBlock(path.join(rulesRoot, "global", "only.md"), "# Only\n1") + "\n")
+      withToolRules(formatRuleBlock(path.join(rulesRoot, "global", "only.md"), "# Only\n1", projectRoot) + "\n")
     );
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -446,7 +449,7 @@ test("apply-rules composes with refresh for local source", () => {
     const output = fs.readFileSync(path.join(projectRoot, "AGENTS.md"), "utf8");
     assert.equal(
       output,
-      withToolRules(formatRuleBlock(path.join(rulesRoot, "global", "only.md"), "# Only\n1") + "\n")
+      withToolRules(formatRuleBlock(path.join(rulesRoot, "global", "only.md"), "# Only\n1", projectRoot) + "\n")
     );
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
