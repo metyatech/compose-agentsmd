@@ -7,7 +7,7 @@
 - Also provide a short, copy-pasteable command the user can run to view the diff in the same format. Use absolute paths so it works regardless of the current working directory, and scope it to the changed rule files.
 - If a diff is provided, a separate detailed summary is not required. If a diff is not possible, include a detailed summary of what changed (added/removed/modified items).
 
-Source: C:/Users/Origin/.agentsmd/cache/metyatech/agent-rules/7dfe2d0bcddc14dac85e0d2c05bc50c13e679601/rules/global/agent-rules-composition.md
+Source: github:metyatech/agent-rules@HEAD/rules/global/agent-rules-composition.md
 
 # Rule composition and maintenance
 
@@ -34,7 +34,7 @@ Source: C:/Users/Origin/.agentsmd/cache/metyatech/agent-rules/7dfe2d0bcddc14dac8
 - Use short, action-oriented bullets; avoid numbered lists unless order matters.
 - Prefer the most general applicable rule to avoid duplication.
 
-Source: C:/Users/Origin/.agentsmd/cache/metyatech/agent-rules/7dfe2d0bcddc14dac85e0d2c05bc50c13e679601/rules/global/autonomous-operations.md
+Source: github:metyatech/agent-rules@HEAD/rules/global/autonomous-operations.md
 
 # Autonomous operations
 
@@ -48,7 +48,7 @@ Source: C:/Users/Origin/.agentsmd/cache/metyatech/agent-rules/7dfe2d0bcddc14dac8
 - Prefer asynchronous, low-friction control channels (GitHub Issues/PR comments) unless a repository mandates another.
 - Design autonomous workflows for high volume: queue requests, set concurrency limits, and auto-throttle to prevent overload.
 
-Source: C:/Users/Origin/.agentsmd/cache/metyatech/agent-rules/7dfe2d0bcddc14dac85e0d2c05bc50c13e679601/rules/global/command-execution.md
+Source: github:metyatech/agent-rules@HEAD/rules/global/command-execution.md
 
 # Workflow and command execution
 
@@ -61,7 +61,7 @@ Source: C:/Users/Origin/.agentsmd/cache/metyatech/agent-rules/7dfe2d0bcddc14dac8
 - If no branch is specified, work on the current branch; direct commits to main/master are allowed.
 - After addressing PR comments, resolve related conversations; after completing a PR, merge it, sync the target branch, and delete the PR branch locally and remotely.
 
-Source: C:/Users/Origin/.agentsmd/cache/metyatech/agent-rules/7dfe2d0bcddc14dac85e0d2c05bc50c13e679601/rules/global/implementation-and-coding-standards.md
+Source: github:metyatech/agent-rules@HEAD/rules/global/implementation-and-coding-standards.md
 
 # Engineering and implementation standards
 
@@ -74,14 +74,13 @@ Source: C:/Users/Origin/.agentsmd/cache/metyatech/agent-rules/7dfe2d0bcddc14dac8
 - Avoid deep nesting; use guard clauses and small functions.
 - Use clear, intention-revealing naming; avoid "Utils" dumping grounds.
 - Prefer configuration/constants over hardcoding; consolidate change points.
-- Keep everything DRY across code, specs, docs, tests, configs, and scripts; proactively refactor repeated procedures into shared configs/scripts with small, local overrides.
+- Keep everything DRY across code, specs, docs, tests, configs, and scripts.
 - Fix root causes; remove obsolete/unused code, branches, comments, and helpers.
 - Externalize large embedded strings/templates/rules when possible.
 - Do not commit build artifacts (follow the repo's .gitignore).
 - Align file/folder names with their contents and keep naming conventions consistent.
-- Do not assume machine-specific environments (fixed workspace directories, drive letters, per-PC paths). Prefer repo-relative paths and explicit configuration so workflows work in arbitrary clone locations.
 
-Source: C:/Users/Origin/.agentsmd/cache/metyatech/agent-rules/7dfe2d0bcddc14dac85e0d2c05bc50c13e679601/rules/global/quality-testing-and-errors.md
+Source: github:metyatech/agent-rules@HEAD/rules/global/quality-testing-and-errors.md
 
 # Quality, testing, and error handling
 
@@ -115,7 +114,7 @@ Source: C:/Users/Origin/.agentsmd/cache/metyatech/agent-rules/7dfe2d0bcddc14dac8
 - Validate config and external inputs at boundaries; fail with actionable guidance.
 - Log minimally but with diagnostic context; never log secrets or personal data.
 
-Source: C:/Users/Origin/.agentsmd/cache/metyatech/agent-rules/7dfe2d0bcddc14dac85e0d2c05bc50c13e679601/rules/global/user-identity-and-accounts.md
+Source: github:metyatech/agent-rules@HEAD/rules/global/user-identity-and-accounts.md
 
 # User identity and accounts
 
@@ -125,7 +124,7 @@ Source: C:/Users/Origin/.agentsmd/cache/metyatech/agent-rules/7dfe2d0bcddc14dac8
 - Use the gh CLI to verify GitHub details when needed.
 - When publishing, cloning, adding submodules, or splitting repos, prefer the user's "metyatech" ownership unless explicitly instructed otherwise.
 
-Source: C:/Users/Origin/.agentsmd/cache/metyatech/agent-rules/7dfe2d0bcddc14dac85e0d2c05bc50c13e679601/rules/global/writing-and-documentation.md
+Source: github:metyatech/agent-rules@HEAD/rules/global/writing-and-documentation.md
 
 # Writing and documentation
 
@@ -145,27 +144,13 @@ Source: C:/Users/Origin/.agentsmd/cache/metyatech/agent-rules/7dfe2d0bcddc14dac8
 - For any code change, assess README impact and update it in the same change set when needed.
 - If a README update is not needed, explain why in the final response.
 - CLI examples in docs must include required parameters.
-- Do not include user-specific local paths, fixed workspace directories, drive letters, or personal data in doc examples. Prefer repo-relative paths and placeholders so instructions work in arbitrary environments.
+- Do not include user-specific local paths or personal data in doc examples.
 
 ## Markdown linking
 
 - When a Markdown document links to a local file, use a path relative to the Markdown file.
 
-Source: C:/Users/Origin/.agentsmd/cache/metyatech/agent-rules/7dfe2d0bcddc14dac85e0d2c05bc50c13e679601/rules/domains/cli/cli-standards.md
-
-# CLI standards
-
-- Provide --help/-h with clear usage, options, and examples; include required parameters in examples.
-- Provide --version (use -V); reserve -v for --verbose.
-- Support stdin/stdout piping; allow output redirection (e.g., --output for file creation).
-- Offer machine-readable output (e.g., --json) when emitting structured data.
-- For modifying/deleting actions, provide --dry-run and an explicit bypass (--yes/--force).
-- Provide controllable logging (--quiet, --verbose, or --trace).
-- Use deterministic exit codes (0 success, non-zero failure) and avoid silent fallbacks.
-- For JSON configuration, define/update a JSON Schema and validate config on load.
-- For interactive CLI prompts, provide required context before asking; for yes/no prompts, Enter means "Yes" and "n" means "No".
-
-Source: C:/Users/Origin/.agentsmd/cache/metyatech/agent-rules/7dfe2d0bcddc14dac85e0d2c05bc50c13e679601/rules/domains/node/module-system.md
+Source: github:metyatech/agent-rules@HEAD/rules/domains/node/module-system.md
 
 # Node module system (ESM)
 
@@ -173,7 +158,7 @@ Source: C:/Users/Origin/.agentsmd/cache/metyatech/agent-rules/7dfe2d0bcddc14dac8
 - Always set "type": "module" in package.json.
 - Prefer ESM with .js extensions for JavaScript config/scripts (e.g., next.config.js as ESM).
 
-Source: C:/Users/Origin/.agentsmd/cache/metyatech/agent-rules/7dfe2d0bcddc14dac85e0d2c05bc50c13e679601/rules/domains/node/npm-packages.md
+Source: github:metyatech/agent-rules@HEAD/rules/domains/node/npm-packages.md
 
 # Node package publishing
 
@@ -186,33 +171,7 @@ Source: C:/Users/Origin/.agentsmd/cache/metyatech/agent-rules/7dfe2d0bcddc14dac8
 - Use npm pack --dry-run to inspect the package contents.
 - Run npm test when tests exist.
 
-Source: C:/Users/Origin/.agentsmd/cache/metyatech/agent-rules/7dfe2d0bcddc14dac85e0d2c05bc50c13e679601/rules/domains/release/release-and-publication.md
-
-# Release and publication
-
-## Packaging and distribution
-
-- Include LICENSE in published artifacts (copyright holder: metyatech).
-- Do not ship build/test artifacts or local configs; ensure a clean environment can use the product via README steps.
-- Define a SemVer policy and document what counts as a breaking change.
-
-## Public repository metadata
-
-- For public repos, set GitHub Description, Topics, and Homepage.
-- Ensure required repo files exist: .github/workflows/ci.yml, issue templates, PR template, SECURITY.md, CONTRIBUTING.md, CODE_OF_CONDUCT.md, CHANGELOG.md.
-- Configure CI to run the repo's standard lint/test/build commands.
-
-## Versioning and release flow
-
-- Update version metadata when release content changes; keep package version and Git tag consistent.
-- Create and push a release tag; create a GitHub Release based on CHANGELOG.
-- If asked to choose a version, decide it yourself.
-- When bumping a version, create the GitHub Release and publish the package in the same update.
-- For npm publishing, ask the user to run npm publish (do not execute it directly).
-- Before publishing, run required prep commands (e.g., npm install, npm test, npm pack --dry-run) and only proceed when ready.
-- If authentication fails during publish, ask the user to complete the publish step.
-- Run dependency security checks before release, address critical issues, and report results.
-- After publishing, update any locally installed copy to the latest release.
+Source: agent-rules-local/release.md
 
 ## Published artifact requirements
 
