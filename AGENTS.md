@@ -7,7 +7,7 @@
 - Also provide a short, copy-pasteable command the user can run to view the diff in the same format. Use absolute paths so it works regardless of the current working directory, and scope it to the changed rule files.
 - If a diff is provided, a separate detailed summary is not required. If a diff is not possible, include a detailed summary of what changed (added/removed/modified items).
 
-Source: /home/runner/.agentsmd/cache/metyatech/agent-rules/a5f372de53e3984f163e4a7a2a400d76df23e62a/rules/global/agent-rules-composition.md
+Source: github:metyatech/agent-rules@HEAD/rules/global/agent-rules-composition.md
 
 # Rule composition and maintenance
 
@@ -34,7 +34,7 @@ Source: /home/runner/.agentsmd/cache/metyatech/agent-rules/a5f372de53e3984f163e4
 - Use short, action-oriented bullets; avoid numbered lists unless order matters.
 - Prefer the most general applicable rule to avoid duplication.
 
-Source: /home/runner/.agentsmd/cache/metyatech/agent-rules/a5f372de53e3984f163e4a7a2a400d76df23e62a/rules/global/autonomous-operations.md
+Source: github:metyatech/agent-rules@HEAD/rules/global/autonomous-operations.md
 
 # Autonomous operations
 
@@ -48,7 +48,7 @@ Source: /home/runner/.agentsmd/cache/metyatech/agent-rules/a5f372de53e3984f163e4
 - Prefer asynchronous, low-friction control channels (GitHub Issues/PR comments) unless a repository mandates another.
 - Design autonomous workflows for high volume: queue requests, set concurrency limits, and auto-throttle to prevent overload.
 
-Source: /home/runner/.agentsmd/cache/metyatech/agent-rules/a5f372de53e3984f163e4a7a2a400d76df23e62a/rules/global/command-execution.md
+Source: github:metyatech/agent-rules@HEAD/rules/global/command-execution.md
 
 # Workflow and command execution
 
@@ -61,7 +61,7 @@ Source: /home/runner/.agentsmd/cache/metyatech/agent-rules/a5f372de53e3984f163e4
 - If no branch is specified, work on the current branch; direct commits to main/master are allowed.
 - After addressing PR comments, resolve related conversations; after completing a PR, merge it, sync the target branch, and delete the PR branch locally and remotely.
 
-Source: /home/runner/.agentsmd/cache/metyatech/agent-rules/a5f372de53e3984f163e4a7a2a400d76df23e62a/rules/global/implementation-and-coding-standards.md
+Source: github:metyatech/agent-rules@HEAD/rules/global/implementation-and-coding-standards.md
 
 # Engineering and implementation standards
 
@@ -80,7 +80,7 @@ Source: /home/runner/.agentsmd/cache/metyatech/agent-rules/a5f372de53e3984f163e4
 - Do not commit build artifacts (follow the repo's .gitignore).
 - Align file/folder names with their contents and keep naming conventions consistent.
 
-Source: /home/runner/.agentsmd/cache/metyatech/agent-rules/a5f372de53e3984f163e4a7a2a400d76df23e62a/rules/global/quality-testing-and-errors.md
+Source: github:metyatech/agent-rules@HEAD/rules/global/quality-testing-and-errors.md
 
 # Quality, testing, and error handling
 
@@ -114,7 +114,7 @@ Source: /home/runner/.agentsmd/cache/metyatech/agent-rules/a5f372de53e3984f163e4
 - Validate config and external inputs at boundaries; fail with actionable guidance.
 - Log minimally but with diagnostic context; never log secrets or personal data.
 
-Source: /home/runner/.agentsmd/cache/metyatech/agent-rules/a5f372de53e3984f163e4a7a2a400d76df23e62a/rules/global/user-identity-and-accounts.md
+Source: github:metyatech/agent-rules@HEAD/rules/global/user-identity-and-accounts.md
 
 # User identity and accounts
 
@@ -124,7 +124,7 @@ Source: /home/runner/.agentsmd/cache/metyatech/agent-rules/a5f372de53e3984f163e4
 - Use the gh CLI to verify GitHub details when needed.
 - When publishing, cloning, adding submodules, or splitting repos, prefer the user's "metyatech" ownership unless explicitly instructed otherwise.
 
-Source: /home/runner/.agentsmd/cache/metyatech/agent-rules/a5f372de53e3984f163e4a7a2a400d76df23e62a/rules/global/writing-and-documentation.md
+Source: github:metyatech/agent-rules@HEAD/rules/global/writing-and-documentation.md
 
 # Writing and documentation
 
@@ -150,7 +150,7 @@ Source: /home/runner/.agentsmd/cache/metyatech/agent-rules/a5f372de53e3984f163e4
 
 - When a Markdown document links to a local file, use a path relative to the Markdown file.
 
-Source: /home/runner/.agentsmd/cache/metyatech/agent-rules/a5f372de53e3984f163e4a7a2a400d76df23e62a/rules/domains/node/module-system.md
+Source: github:metyatech/agent-rules@HEAD/rules/domains/node/module-system.md
 
 # Node module system (ESM)
 
@@ -158,7 +158,7 @@ Source: /home/runner/.agentsmd/cache/metyatech/agent-rules/a5f372de53e3984f163e4
 - Always set "type": "module" in package.json.
 - Prefer ESM with .js extensions for JavaScript config/scripts (e.g., next.config.js as ESM).
 
-Source: /home/runner/.agentsmd/cache/metyatech/agent-rules/a5f372de53e3984f163e4a7a2a400d76df23e62a/rules/domains/node/npm-packages.md
+Source: github:metyatech/agent-rules@HEAD/rules/domains/node/npm-packages.md
 
 # Node package publishing
 
@@ -171,7 +171,7 @@ Source: /home/runner/.agentsmd/cache/metyatech/agent-rules/a5f372de53e3984f163e4
 - Use npm pack --dry-run to inspect the package contents.
 - Run npm test when tests exist.
 
-Source: /home/runner/work/compose-agentsmd/compose-agentsmd/agent-rules-local/release.md
+Source: agent-rules-local/release.md
 
 # Distribution and release
 

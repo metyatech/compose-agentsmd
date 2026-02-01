@@ -660,13 +660,37 @@ const resolveRulesRoot = (
   return { rulesRoot: resolveLocalRulesRoot(rulesetDir, source) };
 };
 
+const formatRuleSourcePath = (
+  rulePath: string,
+  rulesRoot: string,
+  rulesetDir: string,
+  source: string,
+  resolvedRef?: string
+): string => {
+  // Check if this rule is from the resolved rulesRoot (GitHub or local source)
+  const isFromSource = rulePath.startsWith(rulesRoot);
+  
+  if (isFromSource && source.startsWith("github:")) {
+    // GitHub source rule
+    const parsed = parseGithubSource(source);
+    const cacheRepoRoot = path.dirname(rulesRoot);
+    const relativePath = normalizePath(path.relative(cacheRepoRoot, rulePath));
+    const refToUse = resolvedRef ?? parsed.ref;
+    return `github:${parsed.owner}/${parsed.repo}@${refToUse}/${relativePath}`;
+  }
+
+  // For local rules (either from local source or extra), use path relative to project root
+  const result = normalizePath(path.relative(rulesetDir, rulePath));
+  return result;
+};
+
 const composeRuleset = (rulesetPath: string, rootDir: string, options: ComposeOptions): string => {
   const rulesetDir = path.dirname(rulesetPath);
   const projectRuleset = readProjectRuleset(rulesetPath);
   const outputFileName = projectRuleset.output ?? DEFAULT_OUTPUT;
   const outputPath = resolveFrom(rulesetDir, outputFileName);
 
-  const { rulesRoot } = resolveRulesRoot(rulesetDir, projectRuleset.source, options.refresh ?? false);
+  const { rulesRoot, resolvedRef } = resolveRulesRoot(rulesetDir, projectRuleset.source, options.refresh ?? false);
   const globalRoot = path.join(rulesRoot, "global");
   const domainsRoot = path.join(rulesRoot, "domains");
 
@@ -689,7 +713,8 @@ const composeRuleset = (rulesetPath: string, rootDir: string, options: ComposeOp
 
   const parts = resolvedRules.map((rulePath) => {
     const body = normalizeTrailingWhitespace(fs.readFileSync(rulePath, "utf8"));
-    return `Source: ${normalizePath(rulePath)}\n\n${body}`;
+    const sourcePath = formatRuleSourcePath(rulePath, rulesRoot, rulesetDir, projectRuleset.source, resolvedRef);
+    return `Source: ${sourcePath}\n\n${body}`;
   });
 
   const lintHeader = "<!-- markdownlint-disable MD025 -->";
