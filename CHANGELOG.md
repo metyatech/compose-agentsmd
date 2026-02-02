@@ -2,6 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
+## 3.2.4 - 2026-02-02
+- Refactored CLI argument value parsing to reduce duplication.
+
 ## 3.2.3 - 2026-02-01
 - Restored shared tool rules to use `compose-agentsmd` and moved the repo-specific compose instruction into a local rule.
 - Added a local rules file and wired it into the ruleset, then regenerated `AGENTS.md`.
