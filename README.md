@@ -135,3 +135,10 @@ npm run lint
 npm run build
 npm test
 ```
+
+## Overview
+This repository contains the compose-agentsmd project.
+
+## Requirements and Configuration
+- No required environment variables are documented.
+
