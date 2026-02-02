@@ -41,13 +41,21 @@ type CliArgs = {
 const TOOL_RULES_PATH = new URL("../tools/tool-rules.md", import.meta.url);
 const USAGE_PATH = new URL("../tools/usage.txt", import.meta.url);
 
+const readValueArg = (remaining: string[], index: number, flag: string): string => {
+  const value = remaining[index + 1];
+  if (!value) {
+    throw new Error(`Missing value for ${flag}`);
+  }
+  return value;
+};
+
 const parseArgs = (argv: string[]): CliArgs => {
   const args: CliArgs = {};
   const knownCommands = new Set(["edit-rules", "apply-rules", "init"]);
   const remaining = [...argv];
 
   if (remaining.length > 0 && knownCommands.has(remaining[0])) {
-    args.command = remaining.shift() as "edit-rules" | "apply-rules";
+    args.command = remaining.shift() as "edit-rules" | "apply-rules" | "init";
   }
 
   for (let i = 0; i < remaining.length; i += 1) {
@@ -69,30 +77,21 @@ const parseArgs = (argv: string[]): CliArgs => {
     }
 
     if (arg === "--root") {
-      const value = remaining[i + 1];
-      if (!value) {
-        throw new Error("Missing value for --root");
-      }
+      const value = readValueArg(remaining, i, "--root");
       args.root = value;
       i += 1;
       continue;
     }
 
     if (arg === "--ruleset") {
-      const value = remaining[i + 1];
-      if (!value) {
-        throw new Error("Missing value for --ruleset");
-      }
+      const value = readValueArg(remaining, i, "--ruleset");
       args.ruleset = value;
       i += 1;
       continue;
     }
 
     if (arg === "--ruleset-name") {
-      const value = remaining[i + 1];
-      if (!value) {
-        throw new Error("Missing value for --ruleset-name");
-      }
+      const value = readValueArg(remaining, i, "--ruleset-name");
       args.rulesetName = value;
       i += 1;
       continue;
@@ -109,20 +108,14 @@ const parseArgs = (argv: string[]): CliArgs => {
     }
 
     if (arg === "--source") {
-      const value = remaining[i + 1];
-      if (!value) {
-        throw new Error("Missing value for --source");
-      }
+      const value = readValueArg(remaining, i, "--source");
       args.source = value;
       i += 1;
       continue;
     }
 
     if (arg === "--domains") {
-      const value = remaining[i + 1];
-      if (!value) {
-        throw new Error("Missing value for --domains");
-      }
+      const value = readValueArg(remaining, i, "--domains");
       args.domains = [...(args.domains ?? []), ...value.split(",").map((entry) => entry.trim())];
       i += 1;
       continue;
@@ -134,10 +127,7 @@ const parseArgs = (argv: string[]): CliArgs => {
     }
 
     if (arg === "--extra") {
-      const value = remaining[i + 1];
-      if (!value) {
-        throw new Error("Missing value for --extra");
-      }
+      const value = readValueArg(remaining, i, "--extra");
       args.extra = [...(args.extra ?? []), ...value.split(",").map((entry) => entry.trim())];
       i += 1;
       continue;
@@ -149,10 +139,7 @@ const parseArgs = (argv: string[]): CliArgs => {
     }
 
     if (arg === "--output") {
-      const value = remaining[i + 1];
-      if (!value) {
-        throw new Error("Missing value for --output");
-      }
+      const value = readValueArg(remaining, i, "--output");
       args.output = value;
       i += 1;
       continue;
