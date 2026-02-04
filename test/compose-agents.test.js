@@ -485,6 +485,74 @@ test("init creates a default ruleset with comments", () => {
   }
 });
 
+test("supports --quiet and -q to suppress output", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
+
+  try {
+    const projectRoot = path.join(tempRoot, "project");
+    const sourceRoot = path.join(tempRoot, "rules-source");
+    const rulesRoot = path.join(sourceRoot, "rules");
+
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify({ source: path.relative(projectRoot, sourceRoot) }, null, 2)
+    );
+    writeFile(path.join(rulesRoot, "global", "only.md"), "# Only\n1");
+
+    const stdoutLong = runCli(["--quiet", "--root", projectRoot], { cwd: repoRoot });
+    assert.equal(stdoutLong, "");
+
+    const stdoutShort = runCli(["-q", "--root", projectRoot], { cwd: repoRoot });
+    assert.equal(stdoutShort, "");
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("supports --json for machine-readable output", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
+
+  try {
+    const projectRoot = path.join(tempRoot, "project");
+    const sourceRoot = path.join(tempRoot, "rules-source");
+    const rulesRoot = path.join(sourceRoot, "rules");
+
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify({ source: path.relative(projectRoot, sourceRoot) }, null, 2)
+    );
+    writeFile(path.join(rulesRoot, "global", "only.md"), "# Only\n1");
+
+    const stdout = runCli(["--json", "--root", projectRoot], { cwd: repoRoot });
+    const result = JSON.parse(stdout);
+    assert.deepEqual(result, { composed: ["AGENTS.md"] });
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("supports --dry-run for compose", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
+
+  try {
+    const projectRoot = path.join(tempRoot, "project");
+    const sourceRoot = path.join(tempRoot, "rules-source");
+    const rulesRoot = path.join(sourceRoot, "rules");
+
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify({ source: path.relative(projectRoot, sourceRoot) }, null, 2)
+    );
+    writeFile(path.join(rulesRoot, "global", "only.md"), "# Only\n1");
+
+    const stdout = runCli(["--dry-run", "--root", projectRoot], { cwd: repoRoot });
+    assert.match(stdout, /Composed AGENTS\.md:/u);
+    assert.equal(fs.existsSync(path.join(projectRoot, "AGENTS.md")), false);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("init --dry-run does not write files", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
 
