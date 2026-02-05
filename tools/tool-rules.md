@@ -1,5 +1,6 @@
 # Tool Rules (compose-agentsmd)
 - Before starting any work, run `compose-agentsmd` from the project root.
+- If `compose-agentsmd` is not available, install it via npm: `npm install -g compose-agentsmd`.
 - To update shared rules, run `compose-agentsmd edit-rules`, edit the workspace rules, then run `compose-agentsmd apply-rules`.
 - Do not edit `AGENTS.md` directly; update the source rules and regenerate.
 - These tool rules live in tools/tool-rules.md in the compose-agentsmd repository; do not duplicate them in global rule modules.
