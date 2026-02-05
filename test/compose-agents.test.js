@@ -636,13 +636,29 @@ test("init respects --quiet and --json", () => {
     // Case 2: --json outputs JSON and suppresses standard output
     const stdoutJson = runCli(["init", "--yes", "--json", "--root", projectRoot], { cwd: repoRoot });
     const result = JSON.parse(stdoutJson);
-    
+
     assert.equal(result.dryRun, false);
     assert.deepEqual(result.initialized, ["agent-ruleset.json"]);
+    assert.deepEqual(result.localRules, []);
+    assert.deepEqual(result.composed, []);
     assert.equal(fs.existsSync(path.join(projectRoot, "agent-ruleset.json")), true);
-    
+
     // Check that there is no other output mixed with JSON
     assert.doesNotMatch(stdoutJson, /Initialized ruleset:/u);
+
+    // Clean up for next case
+    fs.rmSync(projectRoot, { recursive: true, force: true });
+
+    // Case 3: --json takes precedence over --quiet
+    const stdoutJsonQuiet = runCli(["init", "--yes", "--quiet", "--json", "--root", projectRoot], { cwd: repoRoot });
+    const resultJsonQuiet = JSON.parse(stdoutJsonQuiet);
+
+    assert.equal(resultJsonQuiet.dryRun, false);
+    assert.deepEqual(resultJsonQuiet.initialized, ["agent-ruleset.json"]);
+    assert.deepEqual(resultJsonQuiet.localRules, []);
+    assert.deepEqual(resultJsonQuiet.composed, []);
+    assert.equal(fs.existsSync(path.join(projectRoot, "agent-ruleset.json")), true);
+    assert.doesNotMatch(stdoutJsonQuiet, /Initialized ruleset:/u);
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
