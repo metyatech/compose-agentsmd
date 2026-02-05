@@ -4,8 +4,8 @@ Options:
   --help, -h           Show help and exit
   --version, -V        Show version and exit
   --verbose, -v        Show verbose diagnostics
-  --quiet, -q          Suppress non-error output
-  --json               Output machine-readable JSON
+  --quiet, -q          Suppress non-error human-readable output (JSON output is not suppressed)
+  --json               Output machine-readable JSON (takes precedence over --quiet)
   --root <path>        Project root directory (default: current working directory)
   --ruleset <path>     Only compose a single ruleset file
   --ruleset-name <name> Ruleset filename in the project root (default: agent-ruleset.json)

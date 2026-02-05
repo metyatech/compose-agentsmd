@@ -855,9 +855,16 @@ const initProject = async (args: CliArgs, rootDir: string, rulesetName: string):
     }
   }
 
-  process.stdout.write(formatPlan(plan, rootDir));
+  if (!args.quiet && !args.json) {
+    process.stdout.write(formatPlan(plan, rootDir));
+  }
+
   if (args.dryRun) {
-    process.stdout.write("Dry run: no changes made.\n");
+    if (args.json) {
+      process.stdout.write(JSON.stringify({ dryRun: true, plan }, null, 2) + "\n");
+    } else if (!args.quiet) {
+      process.stdout.write("Dry run: no changes made.\n");
+    }
     return;
   }
 
@@ -871,18 +878,36 @@ const initProject = async (args: CliArgs, rootDir: string, rulesetName: string):
     fs.writeFileSync(extraPath, LOCAL_RULES_TEMPLATE, "utf8");
   }
 
-  process.stdout.write(`Initialized ruleset:\n- ${normalizePath(path.relative(rootDir, rulesetPath))}\n`);
-  if (extraToWrite.length > 0) {
-    process.stdout.write(
-      `Initialized local rules:\n${extraToWrite
-        .map((filePath) => `- ${normalizePath(path.relative(rootDir, filePath))}`)
-        .join("\n")}\n`
-    );
+  let composedOutput: string | undefined;
+  if (args.compose) {
+    composedOutput = composeRuleset(rulesetPath, rootDir, { refresh: args.refresh ?? false });
   }
 
-  if (args.compose) {
-    const output = composeRuleset(rulesetPath, rootDir, { refresh: args.refresh ?? false });
-    process.stdout.write(`Composed AGENTS.md:\n- ${output}\n`);
+  if (args.json) {
+    process.stdout.write(
+      JSON.stringify(
+        {
+          initialized: [normalizePath(path.relative(rootDir, rulesetPath))],
+          localRules: extraToWrite.map((filePath) => normalizePath(path.relative(rootDir, filePath))),
+          composed: composedOutput ? [composedOutput] : [],
+          dryRun: false
+        },
+        null,
+        2
+      ) + "\n"
+    );
+  } else if (!args.quiet) {
+    process.stdout.write(`Initialized ruleset:\n- ${normalizePath(path.relative(rootDir, rulesetPath))}\n`);
+    if (extraToWrite.length > 0) {
+      process.stdout.write(
+        `Initialized local rules:\n${extraToWrite
+          .map((filePath) => `- ${normalizePath(path.relative(rootDir, filePath))}`)
+          .join("\n")}\n`
+      );
+    }
+    if (composedOutput) {
+      process.stdout.write(`Composed AGENTS.md:\n- ${composedOutput}\n`);
+    }
   }
 };
 
@@ -972,7 +997,7 @@ const main = async (): Promise<void> => {
     applyRulesFromWorkspace(rulesetDir, ruleset.source);
     const output = composeRuleset(rulesetPath, rootDir, { refresh: true, dryRun: args.dryRun });
     if (args.json) {
-      process.stdout.write(JSON.stringify({ composed: [output] }, null, 2) + "\n");
+      process.stdout.write(JSON.stringify({ composed: [output], dryRun: !!args.dryRun }, null, 2) + "\n");
     } else if (!args.quiet) {
       process.stdout.write(`Composed AGENTS.md:\n- ${output}\n`);
     }
@@ -989,7 +1014,7 @@ const main = async (): Promise<void> => {
     .map((rulesetPath) => composeRuleset(rulesetPath, rootDir, { refresh: args.refresh, dryRun: args.dryRun }));
 
   if (args.json) {
-    process.stdout.write(JSON.stringify({ composed: outputs }, null, 2) + "\n");
+    process.stdout.write(JSON.stringify({ composed: outputs, dryRun: !!args.dryRun }, null, 2) + "\n");
   } else if (!args.quiet) {
     process.stdout.write(`Composed AGENTS.md:\n${outputs.map((file) => `- ${file}`).join("\n")}\n`);
   }

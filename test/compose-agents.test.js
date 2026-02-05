@@ -525,7 +525,7 @@ test("supports --json for machine-readable output", () => {
 
     const stdout = runCli(["--json", "--root", projectRoot], { cwd: repoRoot });
     const result = JSON.parse(stdout);
-    assert.deepEqual(result, { composed: ["AGENTS.md"] });
+    assert.deepEqual(result, { composed: ["AGENTS.md"], dryRun: false });
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
@@ -578,6 +578,77 @@ test("init refuses to overwrite an existing ruleset without --force", () => {
       () => runCli(["init", "--yes", "--root", projectRoot], { cwd: repoRoot }),
       /Ruleset already exists/u
     );
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("init respects --quiet and --json", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
+
+  try {
+    const projectRoot = path.join(tempRoot, "project");
+
+    // Case 1: --quiet suppresses standard output
+    const stdoutQuiet = runCli(["init", "--yes", "--quiet", "--root", projectRoot], { cwd: repoRoot });
+    assert.equal(stdoutQuiet, "");
+    assert.equal(fs.existsSync(path.join(projectRoot, "agent-ruleset.json")), true);
+
+    // Clean up for next case
+    fs.rmSync(projectRoot, { recursive: true, force: true });
+
+    // Case 2: --json outputs JSON and suppresses standard output
+    const stdoutJson = runCli(["init", "--yes", "--json", "--root", projectRoot], { cwd: repoRoot });
+    const result = JSON.parse(stdoutJson);
+    
+    assert.equal(result.dryRun, false);
+    assert.deepEqual(result.initialized, ["agent-ruleset.json"]);
+    assert.equal(fs.existsSync(path.join(projectRoot, "agent-ruleset.json")), true);
+    
+    // Check that there is no other output mixed with JSON
+    assert.doesNotMatch(stdoutJson, /Initialized ruleset:/u);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("compose respects --dry-run with --json", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
+
+  try {
+    const projectRoot = path.join(tempRoot, "project");
+    const sourceRoot = path.join(tempRoot, "rules-source");
+
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify({ source: path.relative(projectRoot, sourceRoot) }, null, 2)
+    );
+    fs.mkdirSync(path.join(sourceRoot, "rules", "global"), { recursive: true });
+
+    const stdout = runCli(["--dry-run", "--json", "--root", projectRoot], { cwd: repoRoot });
+    const result = JSON.parse(stdout);
+
+    assert.equal(result.dryRun, true);
+    assert.deepEqual(result.composed, ["AGENTS.md"]);
+    assert.equal(fs.existsSync(path.join(projectRoot, "AGENTS.md")), false);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("init --dry-run with --json outputs plan", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
+
+  try {
+    const projectRoot = path.join(tempRoot, "project");
+
+    const stdout = runCli(["init", "--dry-run", "--json", "--root", projectRoot], { cwd: repoRoot });
+    const result = JSON.parse(stdout);
+
+    assert.equal(result.dryRun, true);
+    assert.equal(Array.isArray(result.plan), true);
+    assert.equal(result.plan.some(p => p.path.endsWith("agent-ruleset.json")), true);
+    assert.equal(fs.existsSync(path.join(projectRoot, "agent-ruleset.json")), false);
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
