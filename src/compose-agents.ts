@@ -861,7 +861,19 @@ const initProject = async (args: CliArgs, rootDir: string, rulesetName: string):
 
   if (args.dryRun) {
     if (args.json) {
-      process.stdout.write(JSON.stringify({ dryRun: true, plan }, null, 2) + "\n");
+      process.stdout.write(
+        JSON.stringify(
+          {
+            dryRun: true,
+            plan: plan.map((item) => ({
+              action: item.action,
+              path: normalizePath(path.relative(rootDir, item.path))
+            }))
+          },
+          null,
+          2
+        ) + "\n"
+      );
     } else if (!args.quiet) {
       process.stdout.write("Dry run: no changes made.\n");
     }

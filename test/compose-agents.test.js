@@ -456,6 +456,42 @@ test("apply-rules composes with refresh for local source", () => {
   }
 });
 
+test("apply-rules supports --json output", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
+
+  try {
+    const projectRoot = path.join(tempRoot, "project");
+    const sourceRoot = path.join(tempRoot, "rules-source");
+    const rulesRoot = path.join(sourceRoot, "rules");
+
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify(
+        {
+          source: path.relative(projectRoot, sourceRoot),
+          output: "AGENTS.md"
+        },
+        null,
+        2
+      )
+    );
+
+    writeFile(path.join(rulesRoot, "global", "only.md"), "# Only\n1");
+
+    const stdout = runCli(["apply-rules", "--json", "--root", projectRoot], { cwd: repoRoot });
+    const result = JSON.parse(stdout);
+    assert.deepEqual(result, { composed: ["AGENTS.md"], dryRun: false });
+
+    const output = fs.readFileSync(path.join(projectRoot, "AGENTS.md"), "utf8");
+    assert.equal(
+      output,
+      withToolRules(formatRuleBlock(path.join(rulesRoot, "global", "only.md"), "# Only\n1", projectRoot) + "\n")
+    );
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("init creates a default ruleset with comments", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
 
@@ -647,7 +683,7 @@ test("init --dry-run with --json outputs plan", () => {
 
     assert.equal(result.dryRun, true);
     assert.equal(Array.isArray(result.plan), true);
-    assert.equal(result.plan.some(p => p.path.endsWith("agent-ruleset.json")), true);
+    assert.deepEqual(result.plan, [{ action: "create", path: "agent-ruleset.json" }]);
     assert.equal(fs.existsSync(path.join(projectRoot, "agent-ruleset.json")), false);
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
