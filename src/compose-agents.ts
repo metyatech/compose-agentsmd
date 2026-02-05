@@ -21,8 +21,6 @@ type CliArgs = {
   help?: boolean;
   version?: boolean;
   verbose?: boolean;
-  quiet?: boolean;
-  json?: boolean;
   root?: string;
   ruleset?: string;
   rulesetName?: string;
@@ -75,16 +73,6 @@ const parseArgs = (argv: string[]): CliArgs => {
 
     if (arg === "--verbose" || arg === "-v") {
       args.verbose = true;
-      continue;
-    }
-
-    if (arg === "--quiet" || arg === "-q") {
-      args.quiet = true;
-      continue;
-    }
-
-    if (arg === "--json") {
-      args.json = true;
       continue;
     }
 
@@ -429,7 +417,6 @@ const addRulePaths = (rulePaths: string[], resolvedRules: string[], seenRules: S
 
 type ComposeOptions = {
   refresh?: boolean;
-  dryRun?: boolean;
 };
 
 const sanitizeCacheSegment = (value: string): string => value.replace(/[\\/]/gu, "__");
@@ -721,10 +708,8 @@ const composeRuleset = (rulesetPath: string, rootDir: string, options: ComposeOp
   const toolRules = normalizeTrailingWhitespace(TOOL_RULES);
   const output = `${lintHeader}\n${[toolRules, ...parts].join("\n\n")}\n`;
 
-  if (!options.dryRun) {
-    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-    fs.writeFileSync(outputPath, output, "utf8");
-  }
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  fs.writeFileSync(outputPath, output, "utf8");
 
   return normalizePath(path.relative(rootDir, outputPath));
 };
@@ -970,12 +955,8 @@ const main = async (): Promise<void> => {
     const ruleset = readProjectRuleset(rulesetPath);
 
     applyRulesFromWorkspace(rulesetDir, ruleset.source);
-    const output = composeRuleset(rulesetPath, rootDir, { refresh: true, dryRun: args.dryRun });
-    if (args.json) {
-      process.stdout.write(JSON.stringify({ composed: [output] }, null, 2) + "\n");
-    } else if (!args.quiet) {
-      process.stdout.write(`Composed AGENTS.md:\n- ${output}\n`);
-    }
+    const output = composeRuleset(rulesetPath, rootDir, { refresh: true });
+    process.stdout.write(`Composed AGENTS.md:\n- ${output}\n`);
     return;
   }
 
@@ -986,13 +967,9 @@ const main = async (): Promise<void> => {
 
   const outputs = rulesetFiles
     .sort()
-    .map((rulesetPath) => composeRuleset(rulesetPath, rootDir, { refresh: args.refresh, dryRun: args.dryRun }));
+    .map((rulesetPath) => composeRuleset(rulesetPath, rootDir, { refresh: args.refresh }));
 
-  if (args.json) {
-    process.stdout.write(JSON.stringify({ composed: outputs }, null, 2) + "\n");
-  } else if (!args.quiet) {
-    process.stdout.write(`Composed AGENTS.md:\n${outputs.map((file) => `- ${file}`).join("\n")}\n`);
-  }
+  process.stdout.write(`Composed AGENTS.md:\n${outputs.map((file) => `- ${file}`).join("\n")}\n`);
 };
 
 const run = async (): Promise<void> => {
