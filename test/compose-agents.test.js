@@ -492,6 +492,39 @@ test("apply-rules supports --json output", () => {
   }
 });
 
+test("apply-rules respects --dry-run with --json", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
+
+  try {
+    const projectRoot = path.join(tempRoot, "project");
+    const sourceRoot = path.join(tempRoot, "rules-source");
+    const rulesRoot = path.join(sourceRoot, "rules");
+
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify(
+        {
+          source: path.relative(projectRoot, sourceRoot),
+          output: "AGENTS.md"
+        },
+        null,
+        2
+      )
+    );
+
+    writeFile(path.join(rulesRoot, "global", "only.md"), "# Only\n1");
+
+    const stdout = runCli(["apply-rules", "--dry-run", "--json", "--root", projectRoot], { cwd: repoRoot });
+    assert.doesNotMatch(stdout, /Composed AGENTS\.md:/u);
+
+    const result = JSON.parse(stdout);
+    assert.deepEqual(result, { composed: ["AGENTS.md"], dryRun: true });
+    assert.equal(fs.existsSync(path.join(projectRoot, "AGENTS.md")), false);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("init creates a default ruleset with comments", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
 
