@@ -1,21 +1,21 @@
 #!/usr/bin/env node
 
-import fs from "node:fs";
-import path from "node:path";
-import os from "node:os";
-import { execFileSync } from "node:child_process";
-import readline from "node:readline";
-import { Ajv, type ErrorObject } from "ajv";
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { execFileSync } from 'node:child_process';
+import readline from 'node:readline';
+import { Ajv, type ErrorObject } from 'ajv';
 
-const DEFAULT_RULESET_NAME = "agent-ruleset.json";
-const DEFAULT_OUTPUT = "AGENTS.md";
-const DEFAULT_CACHE_ROOT = path.join(os.homedir(), ".agentsmd", "cache");
-const DEFAULT_WORKSPACE_ROOT = path.join(os.homedir(), ".agentsmd", "workspace");
-const DEFAULT_INIT_SOURCE = "github:owner/repo@latest";
+const DEFAULT_RULESET_NAME = 'agent-ruleset.json';
+const DEFAULT_OUTPUT = 'AGENTS.md';
+const DEFAULT_CACHE_ROOT = path.join(os.homedir(), '.agentsmd', 'cache');
+const DEFAULT_WORKSPACE_ROOT = path.join(os.homedir(), '.agentsmd', 'workspace');
+const DEFAULT_INIT_SOURCE = 'github:owner/repo@latest';
 const DEFAULT_INIT_DOMAINS: string[] = [];
 const DEFAULT_INIT_EXTRA: string[] = [];
-const RULESET_SCHEMA_PATH = new URL("../agent-ruleset.schema.json", import.meta.url);
-const PACKAGE_JSON_PATH = new URL("../package.json", import.meta.url);
+const RULESET_SCHEMA_PATH = new URL('../agent-ruleset.schema.json', import.meta.url);
+const PACKAGE_JSON_PATH = new URL('../package.json', import.meta.url);
 
 type CliArgs = {
   help?: boolean;
@@ -37,11 +37,11 @@ type CliArgs = {
   dryRun?: boolean;
   yes?: boolean;
   force?: boolean;
-  command?: "compose" | "edit-rules" | "apply-rules" | "init";
+  command?: 'compose' | 'edit-rules' | 'apply-rules' | 'init';
 };
 
-const TOOL_RULES_PATH = new URL("../tools/tool-rules.md", import.meta.url);
-const USAGE_PATH = new URL("../tools/usage.txt", import.meta.url);
+const TOOL_RULES_PATH = new URL('../tools/tool-rules.md', import.meta.url);
+const USAGE_PATH = new URL('../tools/usage.txt', import.meta.url);
 
 const readValueArg = (remaining: string[], index: number, flag: string): string => {
   const value = remaining[index + 1];
@@ -53,131 +53,131 @@ const readValueArg = (remaining: string[], index: number, flag: string): string 
 
 const parseArgs = (argv: string[]): CliArgs => {
   const args: CliArgs = {};
-  const knownCommands = new Set(["edit-rules", "apply-rules", "init"]);
+  const knownCommands = new Set(['edit-rules', 'apply-rules', 'init']);
   const remaining = [...argv];
 
   if (remaining.length > 0 && knownCommands.has(remaining[0])) {
-    args.command = remaining.shift() as "edit-rules" | "apply-rules" | "init";
+    args.command = remaining.shift() as 'edit-rules' | 'apply-rules' | 'init';
   }
 
   for (let i = 0; i < remaining.length; i += 1) {
     const arg = remaining[i];
 
-    if (arg === "--help" || arg === "-h") {
+    if (arg === '--help' || arg === '-h') {
       args.help = true;
       continue;
     }
 
-    if (arg === "--version" || arg === "-V") {
+    if (arg === '--version' || arg === '-V') {
       args.version = true;
       continue;
     }
 
-    if (arg === "--verbose" || arg === "-v") {
+    if (arg === '--verbose' || arg === '-v') {
       args.verbose = true;
       continue;
     }
 
-    if (arg === "--quiet" || arg === "-q") {
+    if (arg === '--quiet' || arg === '-q') {
       args.quiet = true;
       continue;
     }
 
-    if (arg === "--json") {
+    if (arg === '--json') {
       args.json = true;
       continue;
     }
 
-    if (arg === "--root") {
-      const value = readValueArg(remaining, i, "--root");
+    if (arg === '--root') {
+      const value = readValueArg(remaining, i, '--root');
       args.root = value;
       i += 1;
       continue;
     }
 
-    if (arg === "--ruleset") {
-      const value = readValueArg(remaining, i, "--ruleset");
+    if (arg === '--ruleset') {
+      const value = readValueArg(remaining, i, '--ruleset');
       args.ruleset = value;
       i += 1;
       continue;
     }
 
-    if (arg === "--ruleset-name") {
-      const value = readValueArg(remaining, i, "--ruleset-name");
+    if (arg === '--ruleset-name') {
+      const value = readValueArg(remaining, i, '--ruleset-name');
       args.rulesetName = value;
       i += 1;
       continue;
     }
 
-    if (arg === "--refresh") {
+    if (arg === '--refresh') {
       args.refresh = true;
       continue;
     }
 
-    if (arg === "--clear-cache") {
+    if (arg === '--clear-cache') {
       args.clearCache = true;
       continue;
     }
 
-    if (arg === "--source") {
-      const value = readValueArg(remaining, i, "--source");
+    if (arg === '--source') {
+      const value = readValueArg(remaining, i, '--source');
       args.source = value;
       i += 1;
       continue;
     }
 
-    if (arg === "--domains") {
-      const value = readValueArg(remaining, i, "--domains");
-      args.domains = [...(args.domains ?? []), ...value.split(",").map((entry) => entry.trim())];
+    if (arg === '--domains') {
+      const value = readValueArg(remaining, i, '--domains');
+      args.domains = [...(args.domains ?? []), ...value.split(',').map((entry) => entry.trim())];
       i += 1;
       continue;
     }
 
-    if (arg === "--no-domains") {
+    if (arg === '--no-domains') {
       args.domains = [];
       continue;
     }
 
-    if (arg === "--extra") {
-      const value = readValueArg(remaining, i, "--extra");
-      args.extra = [...(args.extra ?? []), ...value.split(",").map((entry) => entry.trim())];
+    if (arg === '--extra') {
+      const value = readValueArg(remaining, i, '--extra');
+      args.extra = [...(args.extra ?? []), ...value.split(',').map((entry) => entry.trim())];
       i += 1;
       continue;
     }
 
-    if (arg === "--no-extra") {
+    if (arg === '--no-extra') {
       args.extra = [];
       continue;
     }
 
-    if (arg === "--output") {
-      const value = readValueArg(remaining, i, "--output");
+    if (arg === '--output') {
+      const value = readValueArg(remaining, i, '--output');
       args.output = value;
       i += 1;
       continue;
     }
 
-    if (arg === "--no-global") {
+    if (arg === '--no-global') {
       args.global = false;
       continue;
     }
 
-    if (arg === "--compose") {
+    if (arg === '--compose') {
       args.compose = true;
       continue;
     }
 
-    if (arg === "--dry-run") {
+    if (arg === '--dry-run') {
       args.dryRun = true;
       continue;
     }
 
-    if (arg === "--yes") {
+    if (arg === '--yes') {
       args.yes = true;
       continue;
     }
 
-    if (arg === "--force") {
+    if (arg === '--force') {
       args.force = true;
       continue;
     }
@@ -188,10 +188,10 @@ const parseArgs = (argv: string[]): CliArgs => {
   return args;
 };
 
-const normalizeTrailingWhitespace = (content: string): string => content.replace(/\s+$/u, "");
-const normalizePath = (filePath: string): string => filePath.replace(/\\/g, "/");
+const normalizeTrailingWhitespace = (content: string): string => content.replace(/\s+$/u, '');
+const normalizePath = (filePath: string): string => filePath.replace(/\\/g, '/');
 const isNonEmptyString = (value: unknown): value is string =>
-  typeof value === "string" && value.trim() !== "";
+  typeof value === 'string' && value.trim() !== '';
 const normalizeListOption = (values: string[] | undefined, label: string): string[] | undefined => {
   if (!values) {
     return undefined;
@@ -214,26 +214,26 @@ const askQuestion = (prompt: string): Promise<string> =>
     });
   });
 
-const usage = normalizeTrailingWhitespace(fs.readFileSync(USAGE_PATH, "utf8"));
-const packageJson = JSON.parse(fs.readFileSync(PACKAGE_JSON_PATH, "utf8")) as { version?: string };
-const getVersion = (): string => packageJson.version ?? "unknown";
+const usage = normalizeTrailingWhitespace(fs.readFileSync(USAGE_PATH, 'utf8'));
+const packageJson = JSON.parse(fs.readFileSync(PACKAGE_JSON_PATH, 'utf8')) as { version?: string };
+const getVersion = (): string => packageJson.version ?? 'unknown';
 
-const rulesetSchema = JSON.parse(fs.readFileSync(RULESET_SCHEMA_PATH, "utf8"));
-const TOOL_RULES = normalizeTrailingWhitespace(fs.readFileSync(TOOL_RULES_PATH, "utf8"));
+const rulesetSchema = JSON.parse(fs.readFileSync(RULESET_SCHEMA_PATH, 'utf8'));
+const TOOL_RULES = normalizeTrailingWhitespace(fs.readFileSync(TOOL_RULES_PATH, 'utf8'));
 const ajv = new Ajv({ allErrors: true, strict: false });
 const validateRulesetSchema = ajv.compile(rulesetSchema);
 
 const formatSchemaErrors = (errors: ErrorObject[] | null | undefined): string => {
   if (!errors || errors.length === 0) {
-    return "Unknown schema validation error";
+    return 'Unknown schema validation error';
   }
 
   return errors
     .map((error) => {
-      const pathLabel = error.instancePath ? error.instancePath : "(root)";
-      return `${pathLabel} ${error.message ?? "is invalid"}`;
+      const pathLabel = error.instancePath ? error.instancePath : '(root)';
+      return `${pathLabel} ${error.message ?? 'is invalid'}`;
     })
-    .join("; ");
+    .join('; ');
 };
 
 const resolveFrom = (baseDir: string, targetPath: string): string => {
@@ -272,9 +272,9 @@ const ensureDirectoryExists = (dirPath: string): void => {
 };
 
 const stripJsonComments = (input: string): string => {
-  let output = "";
+  let output = '';
   let inString = false;
-  let stringChar = "";
+  let stringChar = '';
   let escaping = false;
   let inLineComment = false;
   let inBlockComment = false;
@@ -284,7 +284,7 @@ const stripJsonComments = (input: string): string => {
     const next = input[i + 1];
 
     if (inLineComment) {
-      if (char === "\n") {
+      if (char === '\n') {
         inLineComment = false;
         output += char;
       }
@@ -292,7 +292,7 @@ const stripJsonComments = (input: string): string => {
     }
 
     if (inBlockComment) {
-      if (char === "*" && next === "/") {
+      if (char === '*' && next === '/') {
         inBlockComment = false;
         i += 1;
       }
@@ -305,30 +305,30 @@ const stripJsonComments = (input: string): string => {
         escaping = false;
         continue;
       }
-      if (char === "\\") {
+      if (char === '\\') {
         escaping = true;
         continue;
       }
       if (char === stringChar) {
         inString = false;
-        stringChar = "";
+        stringChar = '';
       }
       continue;
     }
 
-    if (char === "/" && next === "/") {
+    if (char === '/' && next === '/') {
       inLineComment = true;
       i += 1;
       continue;
     }
 
-    if (char === "/" && next === "*") {
+    if (char === '/' && next === '*') {
       inBlockComment = true;
       i += 1;
       continue;
     }
 
-    if (char === "\"" || char === "'") {
+    if (char === '"' || char === "'") {
       inString = true;
       stringChar = char;
       output += char;
@@ -342,7 +342,7 @@ const stripJsonComments = (input: string): string => {
 };
 
 const readJsonFile = (filePath: string): unknown => {
-  const raw = fs.readFileSync(filePath, "utf8");
+  const raw = fs.readFileSync(filePath, 'utf8');
   return JSON.parse(stripJsonComments(raw));
 };
 
@@ -402,7 +402,7 @@ const collectMarkdownFiles = (rootDir: string): string[] => {
         continue;
       }
 
-      if (entry.isFile() && path.extname(entry.name).toLowerCase() === ".md") {
+      if (entry.isFile() && path.extname(entry.name).toLowerCase() === '.md') {
         results.push(entryPath);
       }
     }
@@ -415,7 +415,11 @@ const collectMarkdownFiles = (rootDir: string): string[] => {
   });
 };
 
-const addRulePaths = (rulePaths: string[], resolvedRules: string[], seenRules: Set<string>): void => {
+const addRulePaths = (
+  rulePaths: string[],
+  resolvedRules: string[],
+  seenRules: Set<string>,
+): void => {
   for (const rulePath of rulePaths) {
     const resolvedRulePath = path.resolve(rulePath);
     if (seenRules.has(resolvedRulePath)) {
@@ -432,33 +436,33 @@ type ComposeOptions = {
   dryRun?: boolean;
 };
 
-const sanitizeCacheSegment = (value: string): string => value.replace(/[\\/]/gu, "__");
+const sanitizeCacheSegment = (value: string): string => value.replace(/[\\/]/gu, '__');
 const looksLikeCommitHash = (value: string): boolean => /^[a-f0-9]{7,40}$/iu.test(value);
 
 const execGit = (args: string[], cwd?: string): string =>
-  execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 
 const parseGithubSource = (source: string): GithubSource => {
   const trimmed = source.trim();
-  if (!trimmed.startsWith("github:")) {
+  if (!trimmed.startsWith('github:')) {
     throw new Error(`Unsupported source: ${source}`);
   }
 
-  const withoutPrefix = trimmed.slice("github:".length);
-  const [repoPart, refPart] = withoutPrefix.split("@");
-  const [owner, repo] = repoPart.split("/");
+  const withoutPrefix = trimmed.slice('github:'.length);
+  const [repoPart, refPart] = withoutPrefix.split('@');
+  const [owner, repo] = repoPart.split('/');
 
   if (!isNonEmptyString(owner) || !isNonEmptyString(repo)) {
     throw new Error(`Invalid GitHub source (expected github:owner/repo@ref): ${source}`);
   }
 
-  const ref = isNonEmptyString(refPart) ? refPart : "latest";
+  const ref = isNonEmptyString(refPart) ? refPart : 'latest';
   return { owner, repo, ref, url: `https://github.com/${owner}/${repo}.git` };
 };
 
 const parseSemver = (tag: string): number[] | null => {
-  const cleaned = tag.startsWith("v") ? tag.slice(1) : tag;
-  const parts = cleaned.split(".");
+  const cleaned = tag.startsWith('v') ? tag.slice(1) : tag;
+  const parts = cleaned.split('.');
   if (parts.length < 2 || parts.length > 3) {
     return null;
   }
@@ -484,18 +488,18 @@ const compareSemver = (a: number[], b: number[]): number => {
 };
 
 const resolveLatestTag = (repoUrl: string): { tag?: string; hash?: string } => {
-  const raw = execGit(["ls-remote", "--tags", "--refs", repoUrl]);
+  const raw = execGit(['ls-remote', '--tags', '--refs', repoUrl]);
   if (!raw) {
     return {};
   }
 
   const candidates = raw
-    .split("\n")
+    .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => {
       const [hash, ref] = line.split(/\s+/u);
-      const tag = ref?.replace("refs/tags/", "");
+      const tag = ref?.replace('refs/tags/', '');
       if (!hash || !tag) {
         return null;
       }
@@ -517,7 +521,7 @@ const resolveLatestTag = (repoUrl: string): { tag?: string; hash?: string } => {
 };
 
 const resolveHeadHash = (repoUrl: string): string => {
-  const raw = execGit(["ls-remote", repoUrl, "HEAD"]);
+  const raw = execGit(['ls-remote', repoUrl, 'HEAD']);
   const [hash] = raw.split(/\s+/u);
   if (!hash) {
     throw new Error(`Unable to resolve HEAD for ${repoUrl}`);
@@ -526,7 +530,7 @@ const resolveHeadHash = (repoUrl: string): string => {
 };
 
 const resolveRefHash = (repoUrl: string, ref: string): string | null => {
-  const raw = execGit(["ls-remote", repoUrl, ref, `refs/tags/${ref}`, `refs/heads/${ref}`]);
+  const raw = execGit(['ls-remote', repoUrl, ref, `refs/tags/${ref}`, `refs/heads/${ref}`]);
   if (!raw) {
     return null;
   }
@@ -535,27 +539,27 @@ const resolveRefHash = (repoUrl: string, ref: string): string | null => {
 };
 
 const cloneAtRef = (repoUrl: string, ref: string, destination: string): void => {
-  execGit(["clone", "--depth", "1", "--branch", ref, repoUrl, destination]);
+  execGit(['clone', '--depth', '1', '--branch', ref, repoUrl, destination]);
 };
 
 const fetchCommit = (repoUrl: string, commitHash: string, destination: string): void => {
   ensureDir(destination);
-  execGit(["init"], destination);
-  execGit(["remote", "add", "origin", repoUrl], destination);
-  execGit(["fetch", "--depth", "1", "origin", commitHash], destination);
-  execGit(["checkout", "FETCH_HEAD"], destination);
+  execGit(['init'], destination);
+  execGit(['remote', 'add', 'origin', repoUrl], destination);
+  execGit(['fetch', '--depth', '1', 'origin', commitHash], destination);
+  execGit(['checkout', 'FETCH_HEAD'], destination);
 };
 
 const resolveGithubRulesRoot = (
   source: string,
-  refresh: boolean
+  refresh: boolean,
 ): { rulesRoot: string; resolvedRef: string } => {
   const parsed = parseGithubSource(source);
-  const resolved = parsed.ref === "latest" ? resolveLatestTag(parsed.url) : null;
-  const resolvedRef = resolved?.tag ?? (parsed.ref === "latest" ? "HEAD" : parsed.ref);
+  const resolved = parsed.ref === 'latest' ? resolveLatestTag(parsed.url) : null;
+  const resolvedRef = resolved?.tag ?? (parsed.ref === 'latest' ? 'HEAD' : parsed.ref);
   const resolvedHash =
     resolved?.hash ??
-    (resolvedRef === "HEAD"
+    (resolvedRef === 'HEAD'
       ? resolveHeadHash(parsed.url)
       : resolveRefHash(parsed.url, resolvedRef));
 
@@ -564,7 +568,9 @@ const resolveGithubRulesRoot = (
   }
 
   const cacheSegment =
-    resolvedRef === "HEAD" ? sanitizeCacheSegment(resolvedHash ?? resolvedRef) : sanitizeCacheSegment(resolvedRef);
+    resolvedRef === 'HEAD'
+      ? sanitizeCacheSegment(resolvedHash ?? resolvedRef)
+      : sanitizeCacheSegment(resolvedRef);
   const cacheDir = path.join(DEFAULT_CACHE_ROOT, parsed.owner, parsed.repo, cacheSegment);
 
   if (refresh && fs.existsSync(cacheDir)) {
@@ -586,7 +592,7 @@ const resolveGithubRulesRoot = (
     }
   }
 
-  const rulesRoot = path.join(cacheDir, "rules");
+  const rulesRoot = path.join(cacheDir, 'rules');
   ensureDirectoryExists(rulesRoot);
 
   return { rulesRoot, resolvedRef };
@@ -598,13 +604,14 @@ const resolveLocalRulesRoot = (rulesetDir: string, source: string): string => {
     throw new Error(`Missing source path: ${resolvedSource}`);
   }
 
-  const candidate = path.basename(resolvedSource) === "rules" ? resolvedSource : path.join(resolvedSource, "rules");
+  const candidate =
+    path.basename(resolvedSource) === 'rules' ? resolvedSource : path.join(resolvedSource, 'rules');
   ensureDirectoryExists(candidate);
   return candidate;
 };
 
 const resolveWorkspaceRoot = (rulesetDir: string, source: string): string => {
-  if (source.startsWith("github:")) {
+  if (source.startsWith('github:')) {
     const parsed = parseGithubSource(source);
     return path.join(DEFAULT_WORKSPACE_ROOT, parsed.owner, parsed.repo);
   }
@@ -618,42 +625,42 @@ const ensureWorkspaceForGithubSource = (source: string): string => {
 
   if (!fs.existsSync(workspaceRoot)) {
     ensureDir(path.dirname(workspaceRoot));
-    execGit(["clone", parsed.url, workspaceRoot]);
+    execGit(['clone', parsed.url, workspaceRoot]);
   }
 
-  if (parsed.ref !== "latest") {
-    execGit(["fetch", "--all"], workspaceRoot);
-    execGit(["checkout", parsed.ref], workspaceRoot);
+  if (parsed.ref !== 'latest') {
+    execGit(['fetch', '--all'], workspaceRoot);
+    execGit(['checkout', parsed.ref], workspaceRoot);
   }
 
   return workspaceRoot;
 };
 
 const applyRulesFromWorkspace = (rulesetDir: string, source: string): void => {
-  if (!source.startsWith("github:")) {
+  if (!source.startsWith('github:')) {
     return;
   }
 
   const workspaceRoot = ensureWorkspaceForGithubSource(source);
-  const status = execGit(["status", "--porcelain"], workspaceRoot);
+  const status = execGit(['status', '--porcelain'], workspaceRoot);
   if (status) {
     throw new Error(`Workspace has uncommitted changes: ${workspaceRoot}`);
   }
 
-  const branch = execGit(["rev-parse", "--abbrev-ref", "HEAD"], workspaceRoot);
-  if (branch === "HEAD") {
+  const branch = execGit(['rev-parse', '--abbrev-ref', 'HEAD'], workspaceRoot);
+  if (branch === 'HEAD') {
     throw new Error(`Workspace is in detached HEAD state: ${workspaceRoot}`);
   }
 
-  execGit(["push"], workspaceRoot);
+  execGit(['push'], workspaceRoot);
 };
 
 const resolveRulesRoot = (
   rulesetDir: string,
   source: string,
-  refresh: boolean
+  refresh: boolean,
 ): { rulesRoot: string; resolvedRef?: string } => {
-  if (source.startsWith("github:")) {
+  if (source.startsWith('github:')) {
     return resolveGithubRulesRoot(source, refresh);
   }
 
@@ -665,12 +672,12 @@ const formatRuleSourcePath = (
   rulesRoot: string,
   rulesetDir: string,
   source: string,
-  resolvedRef?: string
+  resolvedRef?: string,
 ): string => {
   // Check if this rule is from the resolved rulesRoot (GitHub or local source)
   const isFromSource = rulePath.startsWith(rulesRoot);
-  
-  if (isFromSource && source.startsWith("github:")) {
+
+  if (isFromSource && source.startsWith('github:')) {
     // GitHub source rule
     const parsed = parseGithubSource(source);
     const cacheRepoRoot = path.dirname(rulesRoot);
@@ -690,9 +697,13 @@ const composeRuleset = (rulesetPath: string, rootDir: string, options: ComposeOp
   const outputFileName = projectRuleset.output ?? DEFAULT_OUTPUT;
   const outputPath = resolveFrom(rulesetDir, outputFileName);
 
-  const { rulesRoot, resolvedRef } = resolveRulesRoot(rulesetDir, projectRuleset.source, options.refresh ?? false);
-  const globalRoot = path.join(rulesRoot, "global");
-  const domainsRoot = path.join(rulesRoot, "domains");
+  const { rulesRoot, resolvedRef } = resolveRulesRoot(
+    rulesetDir,
+    projectRuleset.source,
+    options.refresh ?? false,
+  );
+  const globalRoot = path.join(rulesRoot, 'global');
+  const domainsRoot = path.join(rulesRoot, 'domains');
 
   const resolvedRules: string[] = [];
   const seenRules = new Set<string>();
@@ -712,37 +723,43 @@ const composeRuleset = (rulesetPath: string, rootDir: string, options: ComposeOp
   addRulePaths(directRulePaths, resolvedRules, seenRules);
 
   const parts = resolvedRules.map((rulePath) => {
-    const body = normalizeTrailingWhitespace(fs.readFileSync(rulePath, "utf8"));
-    const sourcePath = formatRuleSourcePath(rulePath, rulesRoot, rulesetDir, projectRuleset.source, resolvedRef);
+    const body = normalizeTrailingWhitespace(fs.readFileSync(rulePath, 'utf8'));
+    const sourcePath = formatRuleSourcePath(
+      rulePath,
+      rulesRoot,
+      rulesetDir,
+      projectRuleset.source,
+      resolvedRef,
+    );
     return `Source: ${sourcePath}\n\n${body}`;
   });
 
-  const lintHeader = "<!-- markdownlint-disable MD025 -->";
+  const lintHeader = '<!-- markdownlint-disable MD025 -->';
   const toolRules = normalizeTrailingWhitespace(TOOL_RULES);
-  const output = `${lintHeader}\n${[toolRules, ...parts].join("\n\n")}\n`;
+  const output = `${lintHeader}\n${[toolRules, ...parts].join('\n\n')}\n`;
 
   if (!options.dryRun) {
     fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-    fs.writeFileSync(outputPath, output, "utf8");
+    fs.writeFileSync(outputPath, output, 'utf8');
   }
 
   return normalizePath(path.relative(rootDir, outputPath));
 };
 
 type InitPlanItem = {
-  action: "create" | "overwrite";
+  action: 'create' | 'overwrite';
   path: string;
 };
 
-const LOCAL_RULES_TEMPLATE = "# Local Rules\n\n- Add project-specific instructions here.\n";
+const LOCAL_RULES_TEMPLATE = '# Local Rules\n\n- Add project-specific instructions here.\n';
 
 const buildInitRuleset = (args: CliArgs): ProjectRuleset => {
-  const domains = normalizeListOption(args.domains, "--domains");
-  const extra = normalizeListOption(args.extra, "--extra");
+  const domains = normalizeListOption(args.domains, '--domains');
+  const extra = normalizeListOption(args.extra, '--extra');
 
   const ruleset: ProjectRuleset = {
     source: args.source ?? DEFAULT_INIT_SOURCE,
-    output: args.output ?? DEFAULT_OUTPUT
+    output: args.output ?? DEFAULT_OUTPUT,
   };
 
   if (args.global === false) {
@@ -766,13 +783,13 @@ const formatInitRuleset = (ruleset: ProjectRuleset): string => {
   const domainsValue = JSON.stringify(ruleset.domains ?? []);
   const extraValue = JSON.stringify(ruleset.extra ?? []);
   const lines = [
-    "{",
+    '{',
     '  // Rules source. Use github:owner/repo@ref or a local path.',
     `  "source": "${ruleset.source}",`,
     '  // Domain folders under rules/domains.',
     `  "domains": ${domainsValue},`,
     '  // Additional local rule files to append.',
-    `  "extra": ${extraValue},`
+    `  "extra": ${extraValue},`,
   ];
 
   if (ruleset.global === false) {
@@ -782,19 +799,19 @@ const formatInitRuleset = (ruleset: ProjectRuleset): string => {
 
   lines.push('  // Output file name.');
   lines.push(`  "output": "${ruleset.output ?? DEFAULT_OUTPUT}"`);
-  lines.push("}");
+  lines.push('}');
 
-  return `${lines.join("\n")}\n`;
+  return `${lines.join('\n')}\n`;
 };
 
 const formatPlan = (items: InitPlanItem[], rootDir: string): string => {
   const lines = items.map((item) => {
-    const verb = item.action === "overwrite" ? "Overwrite" : "Create";
+    const verb = item.action === 'overwrite' ? 'Overwrite' : 'Create';
     const relative = normalizePath(path.relative(rootDir, item.path));
     return `- ${verb}: ${relative}`;
   });
 
-  return `Init plan:\n${lines.join("\n")}\n`;
+  return `Init plan:\n${lines.join('\n')}\n`;
 };
 
 const confirmInit = async (args: CliArgs): Promise<void> => {
@@ -803,17 +820,19 @@ const confirmInit = async (args: CliArgs): Promise<void> => {
   }
 
   if (!process.stdin.isTTY) {
-    throw new Error("Confirmation required. Re-run with --yes to continue.");
+    throw new Error('Confirmation required. Re-run with --yes to continue.');
   }
 
-  const answer = await askQuestion("Proceed with init? [y/N] ");
+  const answer = await askQuestion('Proceed with init? [y/N] ');
   if (!/^y(es)?$/iu.test(answer.trim())) {
-    throw new Error("Init aborted.");
+    throw new Error('Init aborted.');
   }
 };
 
 const initProject = async (args: CliArgs, rootDir: string, rulesetName: string): Promise<void> => {
-  const rulesetPath = args.ruleset ? resolveFrom(rootDir, args.ruleset) : path.join(rootDir, rulesetName);
+  const rulesetPath = args.ruleset
+    ? resolveFrom(rootDir, args.ruleset)
+    : path.join(rootDir, rulesetName);
   const rulesetDir = path.dirname(rulesetPath);
   const ruleset = buildInitRuleset(args);
   const outputPath = resolveFrom(rulesetDir, ruleset.output ?? DEFAULT_OUTPUT);
@@ -824,9 +843,9 @@ const initProject = async (args: CliArgs, rootDir: string, rulesetName: string):
     if (!args.force) {
       throw new Error(`Ruleset already exists: ${normalizePath(rulesetPath)}`);
     }
-    plan.push({ action: "overwrite", path: rulesetPath });
+    plan.push({ action: 'overwrite', path: rulesetPath });
   } else {
-    plan.push({ action: "create", path: rulesetPath });
+    plan.push({ action: 'create', path: rulesetPath });
   }
 
   const extraFiles = (ruleset.extra ?? []).map((rulePath) => resolveFrom(rulesetDir, rulePath));
@@ -834,24 +853,26 @@ const initProject = async (args: CliArgs, rootDir: string, rulesetName: string):
   for (const extraPath of extraFiles) {
     if (fs.existsSync(extraPath)) {
       if (args.force) {
-        plan.push({ action: "overwrite", path: extraPath });
+        plan.push({ action: 'overwrite', path: extraPath });
         extraToWrite.push(extraPath);
       }
       continue;
     }
 
-    plan.push({ action: "create", path: extraPath });
+    plan.push({ action: 'create', path: extraPath });
     extraToWrite.push(extraPath);
   }
 
   if (args.compose) {
     if (fs.existsSync(outputPath)) {
       if (!args.force) {
-        throw new Error(`Output already exists: ${normalizePath(outputPath)} (use --force to overwrite)`);
+        throw new Error(
+          `Output already exists: ${normalizePath(outputPath)} (use --force to overwrite)`,
+        );
       }
-      plan.push({ action: "overwrite", path: outputPath });
+      plan.push({ action: 'overwrite', path: outputPath });
     } else {
-      plan.push({ action: "create", path: outputPath });
+      plan.push({ action: 'create', path: outputPath });
     }
   }
 
@@ -867,15 +888,15 @@ const initProject = async (args: CliArgs, rootDir: string, rulesetName: string):
             dryRun: true,
             plan: plan.map((item) => ({
               action: item.action,
-              path: normalizePath(path.relative(rootDir, item.path))
-            }))
+              path: normalizePath(path.relative(rootDir, item.path)),
+            })),
           },
           null,
-          2
-        ) + "\n"
+          2,
+        ) + '\n',
       );
     } else if (!args.quiet) {
-      process.stdout.write("Dry run: no changes made.\n");
+      process.stdout.write('Dry run: no changes made.\n');
     }
     return;
   }
@@ -883,11 +904,11 @@ const initProject = async (args: CliArgs, rootDir: string, rulesetName: string):
   await confirmInit(args);
 
   fs.mkdirSync(path.dirname(rulesetPath), { recursive: true });
-  fs.writeFileSync(`${rulesetPath}`, formatInitRuleset(ruleset), "utf8");
+  fs.writeFileSync(`${rulesetPath}`, formatInitRuleset(ruleset), 'utf8');
 
   for (const extraPath of extraToWrite) {
     fs.mkdirSync(path.dirname(extraPath), { recursive: true });
-    fs.writeFileSync(extraPath, LOCAL_RULES_TEMPLATE, "utf8");
+    fs.writeFileSync(extraPath, LOCAL_RULES_TEMPLATE, 'utf8');
   }
 
   let composedOutput: string | undefined;
@@ -900,21 +921,25 @@ const initProject = async (args: CliArgs, rootDir: string, rulesetName: string):
       JSON.stringify(
         {
           initialized: [normalizePath(path.relative(rootDir, rulesetPath))],
-          localRules: extraToWrite.map((filePath) => normalizePath(path.relative(rootDir, filePath))),
+          localRules: extraToWrite.map((filePath) =>
+            normalizePath(path.relative(rootDir, filePath)),
+          ),
           composed: composedOutput ? [composedOutput] : [],
-          dryRun: false
+          dryRun: false,
         },
         null,
-        2
-      ) + "\n"
+        2,
+      ) + '\n',
     );
   } else if (!args.quiet) {
-    process.stdout.write(`Initialized ruleset:\n- ${normalizePath(path.relative(rootDir, rulesetPath))}\n`);
+    process.stdout.write(
+      `Initialized ruleset:\n- ${normalizePath(path.relative(rootDir, rulesetPath))}\n`,
+    );
     if (extraToWrite.length > 0) {
       process.stdout.write(
         `Initialized local rules:\n${extraToWrite
           .map((filePath) => `- ${normalizePath(path.relative(rootDir, filePath))}`)
-          .join("\n")}\n`
+          .join('\n')}\n`,
       );
     }
     if (composedOutput) {
@@ -923,7 +948,11 @@ const initProject = async (args: CliArgs, rootDir: string, rulesetName: string):
   }
 };
 
-const getRulesetFiles = (rootDir: string, specificRuleset: string | undefined, rulesetName: string): string[] => {
+const getRulesetFiles = (
+  rootDir: string,
+  specificRuleset: string | undefined,
+  rulesetName: string,
+): string[] => {
   if (specificRuleset) {
     const resolved = resolveFrom(rootDir, specificRuleset);
     ensureFileExists(resolved);
@@ -937,7 +966,11 @@ const getRulesetFiles = (rootDir: string, specificRuleset: string | undefined, r
   return [defaultRuleset];
 };
 
-const ensureSingleRuleset = (rulesetFiles: string[], rootDir: string, rulesetName: string): string => {
+const ensureSingleRuleset = (
+  rulesetFiles: string[],
+  rootDir: string,
+  rulesetName: string,
+): string => {
   if (rulesetFiles.length === 0) {
     const expectedPath = normalizePath(path.join(rootDir, rulesetName));
     throw new Error(`Missing ruleset file: ${expectedPath}`);
@@ -961,34 +994,34 @@ const main = async (): Promise<void> => {
 
   if (args.clearCache) {
     clearCache();
-    process.stdout.write("Cache cleared.\n");
+    process.stdout.write('Cache cleared.\n');
     return;
   }
 
   const rootDir = args.root ? path.resolve(args.root) : process.cwd();
   const rulesetName = args.rulesetName || DEFAULT_RULESET_NAME;
   const rulesetFiles = getRulesetFiles(rootDir, args.ruleset, rulesetName);
-  const command = args.command ?? "compose";
+  const command = args.command ?? 'compose';
   const logVerbose = (message: string): void => {
     if (args.verbose) {
       process.stdout.write(`${message}\n`);
     }
   };
 
-  logVerbose("Verbose:");
+  logVerbose('Verbose:');
   logVerbose(`- Root: ${rootDir}`);
   logVerbose(`- Ruleset name: ${rulesetName}`);
   logVerbose(
-    `- Ruleset files:\n${rulesetFiles.map((file) => `  - ${normalizePath(path.relative(rootDir, file))}`).join("\n")}`
+    `- Ruleset files:\n${rulesetFiles.map((file) => `  - ${normalizePath(path.relative(rootDir, file))}`).join('\n')}`,
   );
 
-  if (command === "edit-rules") {
+  if (command === 'edit-rules') {
     const rulesetPath = ensureSingleRuleset(rulesetFiles, rootDir, rulesetName);
     const rulesetDir = path.dirname(rulesetPath);
     const ruleset = readProjectRuleset(rulesetPath);
 
     let workspaceRoot = resolveWorkspaceRoot(rulesetDir, ruleset.source);
-    if (ruleset.source.startsWith("github:")) {
+    if (ruleset.source.startsWith('github:')) {
       workspaceRoot = ensureWorkspaceForGithubSource(ruleset.source);
     }
 
@@ -996,12 +1029,12 @@ const main = async (): Promise<void> => {
     return;
   }
 
-  if (command === "init") {
+  if (command === 'init') {
     await initProject(args, rootDir, rulesetName);
     return;
   }
 
-  if (command === "apply-rules") {
+  if (command === 'apply-rules') {
     const rulesetPath = ensureSingleRuleset(rulesetFiles, rootDir, rulesetName);
     const rulesetDir = path.dirname(rulesetPath);
     const ruleset = readProjectRuleset(rulesetPath);
@@ -1009,7 +1042,9 @@ const main = async (): Promise<void> => {
     applyRulesFromWorkspace(rulesetDir, ruleset.source);
     const output = composeRuleset(rulesetPath, rootDir, { refresh: true, dryRun: args.dryRun });
     if (args.json) {
-      process.stdout.write(JSON.stringify({ composed: [output], dryRun: !!args.dryRun }, null, 2) + "\n");
+      process.stdout.write(
+        JSON.stringify({ composed: [output], dryRun: !!args.dryRun }, null, 2) + '\n',
+      );
     } else if (!args.quiet) {
       process.stdout.write(`Composed AGENTS.md:\n- ${output}\n`);
     }
@@ -1023,12 +1058,16 @@ const main = async (): Promise<void> => {
 
   const outputs = rulesetFiles
     .sort()
-    .map((rulesetPath) => composeRuleset(rulesetPath, rootDir, { refresh: args.refresh, dryRun: args.dryRun }));
+    .map((rulesetPath) =>
+      composeRuleset(rulesetPath, rootDir, { refresh: args.refresh, dryRun: args.dryRun }),
+    );
 
   if (args.json) {
-    process.stdout.write(JSON.stringify({ composed: outputs, dryRun: !!args.dryRun }, null, 2) + "\n");
+    process.stdout.write(
+      JSON.stringify({ composed: outputs, dryRun: !!args.dryRun }, null, 2) + '\n',
+    );
   } else if (!args.quiet) {
-    process.stdout.write(`Composed AGENTS.md:\n${outputs.map((file) => `- ${file}`).join("\n")}\n`);
+    process.stdout.write(`Composed AGENTS.md:\n${outputs.map((file) => `- ${file}`).join('\n')}\n`);
   }
 };
 

@@ -3,13 +3,16 @@
 All notable changes to this project will be documented in this file.
 
 ## 3.2.4 - 2026-02-02
+
 - Refactored CLI argument value parsing to reduce duplication.
 
 ## 3.2.3 - 2026-02-01
+
 - Restored shared tool rules to use `compose-agentsmd` and moved the repo-specific compose instruction into a local rule.
 - Added a local rules file and wired it into the ruleset, then regenerated `AGENTS.md`.
 
 ## 3.2.2 - 2026-02-01
+
 - Normalized AGENTS.md Source paths to GitHub-style refs for remote rules and project-relative paths for local rules, with matching test updates.
 - Added a pre-commit hook to run lint/test/build.
 - Updated the ruleset to use `github:metyatech/agent-rules` with `cli`/`release` domains, removing the local release extra and regenerating AGENTS.md with the shared rules.
@@ -17,9 +20,11 @@ All notable changes to this project will be documented in this file.
 - Bumped @types/node to ^25.1.0.
 
 ## 3.2.1 - 2026-01-27
+
 - Regenerated `AGENTS.md` to exclude the `AGENTS.md` file from rule diff output.
 
 ## 1.0.1 - 2026-01-25
+
 - Switched the package to ESM (`"type": "module"`, NodeNext compiler options).
 - Hardened npm publish settings (`publishConfig.access`, `files`, `prepare`).
 - Expanded test coverage for rules root precedence and ruleset validation.
@@ -27,35 +32,44 @@ All notable changes to this project will be documented in this file.
 - Regenerated `AGENTS.md` from the updated rule modules.
 
 ## 1.1.0 - 2026-01-26
+
 - Added JSON Schema validation for rulesets with an explicit schema file.
 - Prepended tool guidance rules to generated `AGENTS.md` files.
 - Updated shared rule modules for JSON schema validation and English rule writing guidance.
 
 ## 1.1.1 - 2026-01-26
+
 - Clarified that README updates must be edited at the same time as code changes in shared rules.
 
 ## 1.1.2 - 2026-01-26
+
 - Clarified that version bumps must include both release creation and package publishing.
 
 ## 2.0.0 - 2026-01-26
+
 - Switched ruleset format to `source/global/domains/extra` with remote GitHub sources and cache support in `~/.agentsmd`.
 - Added `--refresh` and `--clear-cache` cache management commands.
 - Updated ruleset schema, tests, and README to match the new format.
 
 ## 2.0.1 - 2026-01-26
+
 - Moved the publish/global-update rule into local rules for this repository.
 
 ## 2.0.2 - 2026-01-26
+
 - Externalized tool-inserted rules and usage text into `tools/`.
 - Added rule guidance to externalize long embedded strings/templates when possible.
 
 ## 3.0.0 - 2026-01-26
+
 - Removed recursive ruleset discovery; only the project root ruleset is composed unless `--ruleset` is provided.
 
 ## 3.1.0 - 2026-01-26
+
 - Added `--version`/`-V` and `--verbose`/`-v` flags with verbose diagnostics output.
 
 ## 3.2.0 - 2026-01-26
+
 - Added `init` to bootstrap rulesets with dry-run, confirmation, and compose options.
 - Allowed ruleset files to include line/block comments (JSON with comments).
 - Updated init defaults to use generic GitHub sources and omit global/domains/extra unless specified.
