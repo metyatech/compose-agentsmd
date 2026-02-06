@@ -83,7 +83,7 @@ Ruleset files accept JSON with `//` or `/* */` comments.
   // Additional local rule files to append.
   "extra": ["agent-rules-local/custom.md"],
   // Output file name.
-  "output": "AGENTS.md"
+  "output": "AGENTS.md",
 }
 ```
 
@@ -137,8 +137,9 @@ npm test
 ```
 
 ## Overview
+
 This repository contains the compose-agentsmd project.
 
 ## Requirements and Configuration
-- No required environment variables are documented.
 
+- No required environment variables are documented.
