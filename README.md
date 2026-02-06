@@ -68,7 +68,7 @@ compose-agentsmd edit-rules
 compose-agentsmd apply-rules
 ```
 
-`edit-rules` clones the GitHub source into the workspace (or reuses it). `apply-rules` pushes the workspace (if clean) and regenerates `AGENTS.md` by refreshing the cache. If your `source` is a local path, `edit-rules` will just print that path and `apply-rules` will skip the push.
+`edit-rules` clones the GitHub source into the workspace (or reuses it), then prints the workspace path, rules directory, and next steps. `apply-rules` pushes the workspace (if clean) and regenerates `AGENTS.md` by refreshing the cache. If your `source` is a local path, `edit-rules` points to the local workspace and `apply-rules` skips the push.
 
 ## Project ruleset format
 

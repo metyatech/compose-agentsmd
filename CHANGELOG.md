@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## 3.2.6 - 2026-02-06
+- Enhanced `edit-rules` output to show the rules directory and concrete next steps for editing and applying rule updates.
+- Added tests that verify the new `edit-rules` guidance output for local source layouts.
+- Documented that `apply-rules` pushes the workspace for GitHub sources (when clean) before regenerating `AGENTS.md`.
+- Updated README shared-rules update flow text to match the current CLI behavior.
+- Regenerated `AGENTS.md` with updated tool rules and latest upstream shared rule content.
+
 ## 3.2.5 - 2026-02-06
 - Clarified that `tools/tool-rules.md` is the shared rule source for all repositories using compose-agentsmd.
 - Added a rule that planned rule updates must be shown first (preferably as a colorized diff) and require explicit approval before edits are applied.

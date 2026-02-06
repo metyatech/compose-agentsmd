@@ -992,7 +992,20 @@ const main = async (): Promise<void> => {
       workspaceRoot = ensureWorkspaceForGithubSource(ruleset.source);
     }
 
-    process.stdout.write(`Rules workspace: ${workspaceRoot}\n`);
+    const rulesDirectory = ruleset.source.startsWith("github:")
+      ? path.join(workspaceRoot, "rules")
+      : resolveLocalRulesRoot(rulesetDir, ruleset.source);
+
+    process.stdout.write(
+      [
+        `Rules workspace: ${workspaceRoot}`,
+        `Rules directory: ${rulesDirectory}`,
+        "Next steps:",
+        `- Edit rule files under: ${rulesDirectory}`,
+        "- If this source is GitHub, commit and push the workspace changes before apply-rules.",
+        "- Run compose-agentsmd apply-rules from your project root to apply updates and regenerate AGENTS.md."
+      ].join("\n") + "\n"
+    );
     return;
   }
 

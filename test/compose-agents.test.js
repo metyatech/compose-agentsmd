@@ -417,6 +417,41 @@ test("edit-rules uses local source path as workspace", () => {
 
     const stdout = runCli(["edit-rules", "--root", projectRoot], { cwd: repoRoot });
     assert.match(stdout, new RegExp(`Rules workspace: ${sourceRoot.replace(/\\/g, "\\\\")}`, "u"));
+    assert.match(stdout, new RegExp(`Rules directory: ${path.join(sourceRoot, "rules").replace(/\\/g, "\\\\")}`, "u"));
+    assert.match(stdout, /Next steps:/u);
+    assert.match(stdout, /compose-agentsmd apply-rules/u);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("edit-rules keeps rules directory when source points directly to rules", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
+
+  try {
+    const projectRoot = path.join(tempRoot, "project");
+    const sourceRoot = path.join(tempRoot, "rules-source");
+    const rulesRoot = path.join(sourceRoot, "rules");
+
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify(
+        {
+          source: path.relative(projectRoot, rulesRoot),
+          output: "AGENTS.md"
+        },
+        null,
+        2
+      )
+    );
+
+    fs.mkdirSync(path.join(rulesRoot, "global"), { recursive: true });
+
+    const stdout = runCli(["edit-rules", "--root", projectRoot], { cwd: repoRoot });
+    assert.match(stdout, new RegExp(`Rules workspace: ${sourceRoot.replace(/\\/g, "\\\\")}`, "u"));
+    assert.match(stdout, new RegExp(`Rules directory: ${rulesRoot.replace(/\\/g, "\\\\")}`, "u"));
+    assert.match(stdout, /Next steps:/u);
+    assert.match(stdout, /compose-agentsmd apply-rules/u);
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
