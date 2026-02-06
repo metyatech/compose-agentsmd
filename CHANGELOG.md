@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## 3.2.5 - 2026-02-06
+- Clarified that `tools/tool-rules.md` is the shared rule source for all repositories using compose-agentsmd.
+- Added a rule that planned rule updates must be shown first (preferably as a colorized diff) and require explicit approval before edits are applied.
+- Regenerated `AGENTS.md` with the updated tool rules and latest shared upstream rule content.
+
 ## 3.2.4 - 2026-02-02
 - Refactored CLI argument value parsing to reduce duplication.
 
