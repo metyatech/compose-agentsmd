@@ -657,6 +657,59 @@ test("supports --dry-run for compose", () => {
   }
 });
 
+test("prints an AGENTS.md diff when output changes (no git required)", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
+
+  try {
+    const projectRoot = path.join(tempRoot, "project");
+    const sourceRoot = path.join(tempRoot, "rules-source");
+    const rulesRoot = path.join(sourceRoot, "rules");
+
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify({ source: path.relative(projectRoot, sourceRoot) }, null, 2)
+    );
+    writeFile(path.join(rulesRoot, "global", "only.md"), "# Only\n1");
+
+    writeFile(path.join(projectRoot, "AGENTS.md"), "old\n");
+
+    const stdout = runCli(["--root", projectRoot], { cwd: repoRoot });
+    assert.match(stdout, /Composed AGENTS\.md:/u);
+    assert.match(stdout, /AGENTS\.md updated/u);
+    assert.match(stdout, /--- BEGIN DIFF ---/u);
+    assert.match(stdout, /--- a\/AGENTS\.md/u);
+    assert.match(stdout, /\+\+\+ b\/AGENTS\.md/u);
+    assert.match(stdout, /--- END DIFF ---/u);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("prints no diff when AGENTS.md is unchanged", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
+
+  try {
+    const projectRoot = path.join(tempRoot, "project");
+    const sourceRoot = path.join(tempRoot, "rules-source");
+    const rulesRoot = path.join(sourceRoot, "rules");
+
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify({ source: path.relative(projectRoot, sourceRoot) }, null, 2)
+    );
+    writeFile(path.join(rulesRoot, "global", "only.md"), "# Only\n1");
+
+    runCli(["--root", projectRoot], { cwd: repoRoot });
+    const stdout = runCli(["--root", projectRoot], { cwd: repoRoot });
+
+    assert.match(stdout, /Composed AGENTS\.md:/u);
+    assert.match(stdout, /AGENTS\.md unchanged/u);
+    assert.doesNotMatch(stdout, /BEGIN DIFF/u);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("init --dry-run does not write files", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
 

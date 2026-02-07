@@ -35,6 +35,8 @@ The tool reads `agent-ruleset.json` from the given root directory (default: curr
 The tool prepends a small "Tool Rules" block to every generated `AGENTS.md` so agents know how to regenerate or update rules.
 Each composed rule section is also prefixed with the source file path that produced it.
 
+When the output file is `AGENTS.md`, the CLI also prints a unified diff for `AGENTS.md` when it changes (and prints `AGENTS.md unchanged.` when it does not). This works even when the project is not under git. `--quiet` and `--json` suppress this output.
+
 ## Setup (init)
 
 For a project that does not have a ruleset yet, bootstrap one with `init`:

@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## 3.2.7 - 2026-02-07
+- Print a unified diff for `AGENTS.md` when it changes during compose/apply-rules (works without git).
+- Suppress the diff/recognition hint output when using `--quiet` or `--json`.
+- Added regression tests for the diff output behavior.
+
 ## 3.2.6 - 2026-02-06
 - Enhanced `edit-rules` output to show the rules directory and concrete next steps for editing and applying rule updates.
 - Added tests that verify the new `edit-rules` guidance output for local source layouts.
