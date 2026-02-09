@@ -1,0 +1,5 @@
+dist/
+node_modules/
+coverage/
+AGENTS.md
+package-lock.json

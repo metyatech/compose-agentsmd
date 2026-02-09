@@ -85,7 +85,7 @@ Ruleset files accept JSON with `//` or `/* */` comments.
   // Additional local rule files to append.
   "extra": ["agent-rules-local/custom.md"],
   // Output file name.
-  "output": "AGENTS.md"
+  "output": "AGENTS.md",
 }
 ```
 
@@ -133,14 +133,23 @@ Remote sources are cached under `~/.agentsmd/cache/<owner>/<repo>/<ref>/`. Use `
 
 ```sh
 npm install
-npm run lint
-npm run build
-npm test
+npm run verify
+```
+
+`npm run verify` runs linting, typechecking, formatting checks, and tests.
+You can also run them individually:
+
+```sh
+npm run lint         # Check for lint issues
+npm run typecheck    # Check for type errors
+npm run format       # Fix formatting
+npm test             # Run tests
 ```
 
 ## Overview
+
 This repository contains the compose-agentsmd project.
 
 ## Requirements and Configuration
-- No required environment variables are documented.
 
+- No required environment variables are documented.
