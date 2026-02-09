@@ -2,9 +2,12 @@
 
 This repository contains CLI tooling for composing per-project `AGENTS.md` files from modular rule sets.
 
-## Release notes
+## Project Docs
 
-See `CHANGELOG.md` for release notes.
+- [LICENSE](LICENSE)
+- [SECURITY.md](SECURITY.md)
+- [CONTRIBUTING.md](CONTRIBUTING.md)
+- [CHANGELOG.md](CHANGELOG.md)
 
 It is intended to be used together with shared rule modules such as the public `agent-rules` repository.
 
@@ -83,7 +86,7 @@ Ruleset files accept JSON with `//` or `/* */` comments.
   // Additional local rule files to append.
   "extra": ["agent-rules-local/custom.md"],
   // Output file name.
-  "output": "AGENTS.md"
+  "output": "AGENTS.md",
 }
 ```
 
@@ -127,18 +130,28 @@ Remote sources are cached under `~/.agentsmd/cache/<owner>/<repo>/<ref>/`. Use `
 - `apply-rules`: push workspace changes (if GitHub source) and regenerate rules with refresh
 - `init`: generate a new ruleset and optional local rules file
 
+## Project Docs
+
+- [LICENSE](LICENSE)
+- [SECURITY.md](SECURITY.md)
+- [CONTRIBUTING.md](CONTRIBUTING.md)
+- [CHANGELOG.md](CHANGELOG.md)
+
 ## Development
 
 ```sh
 npm install
 npm run lint
+npm run format
 npm run build
 npm test
+npm run verify
 ```
 
 ## Overview
+
 This repository contains the compose-agentsmd project.
 
 ## Requirements and Configuration
-- No required environment variables are documented.
 
+- No required environment variables are documented.

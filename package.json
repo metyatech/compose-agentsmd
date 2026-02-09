@@ -34,10 +34,13 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "lint": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint . && tsc -p tsconfig.json --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "prepare": "npm run build",
     "prepack": "npm run build",
-    "test": "npm run build && node --test",
+    "test": "node --test",
+    "verify": "npm run lint && npm run format:check && npm run build && npm test",
     "compose": "npm run build && node dist/compose-agents.js"
   },
   "engines": {
@@ -45,7 +48,15 @@
   },
   "devDependencies": {
     "@types/node": "^25.1.0",
-    "typescript": "^5.7.3"
+    "@typescript-eslint/eslint-plugin": "^8.54.0",
+    "@typescript-eslint/parser": "^8.54.0",
+    "eslint": "^9.39.2",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.5",
+    "globals": "^17.3.0",
+    "prettier": "^3.8.1",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.54.0"
   },
   "dependencies": {
     "ajv": "^8.17.1"
