@@ -10,9 +10,9 @@ A clear and concise description of the problem.
 
 ## Steps to reproduce
 
-1.
-2.
-3.
+1. <step 1>
+2. <step 2>
+3. <step 3>
 
 ## Expected behavior
 

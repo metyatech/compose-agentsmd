@@ -4,11 +4,11 @@ Describe the change and why it is needed.
 
 ## Changes
 
--
+- <describe change>
 
 ## Testing
 
-- [ ] npm run lint
+- [ ] npm run check
 - [ ] npm test
 - [ ] npm pack --dry-run (if publishing-related)
 

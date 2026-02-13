@@ -3,11 +3,11 @@
 ## Development setup
 
 1. Install dependencies.
-2. Run lint and tests before submitting changes.
+2. Run checks and tests before submitting changes.
 
 ```sh
 npm ci
-npm run lint
+npm run check
 npm test
 ```
 

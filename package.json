@@ -37,7 +37,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "check": "npm run lint && npm run typecheck && prettier --check . && npm audit",
+    "check": "npm run lint && npm run typecheck && prettier --check . && npm audit --audit-level=high --omit=dev",
     "prepare": "npm run build",
     "prepack": "npm run build",
     "test": "npm run build && node --test",
@@ -48,8 +48,6 @@
   },
   "devDependencies": {
     "@types/node": "^25.1.0",
-    "@typescript-eslint/eslint-plugin": "^8.54.0",
-    "@typescript-eslint/parser": "^8.54.0",
     "eslint": "^9.39.2",
     "eslint-config-prettier": "^10.1.8",
     "globals": "^17.3.0",
