@@ -132,6 +132,8 @@ Remote sources are cached under `~/.agentsmd/cache/<owner>/<repo>/<ref>/`. Use `
 ```sh
 npm install
 npm run check
+npm run format
+npm run typecheck
 npm run build
 npm test
 ```
