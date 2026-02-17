@@ -23,6 +23,14 @@ export default tseslint.config(
     },
   },
   {
+    files: ['test/**/*.js'],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+      },
+    },
+  },
+  {
     ignores: ['dist/**', 'node_modules/**', 'AGENTS.md'],
   },
 );

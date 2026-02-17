@@ -9,8 +9,6 @@ Describe the change and why it is needed.
 ## Testing
 
 - [ ] npm run check
-- [ ] npm run format
-- [ ] npm run typecheck
 - [ ] npm test
 - [ ] npm pack --dry-run (if publishing-related)
 
