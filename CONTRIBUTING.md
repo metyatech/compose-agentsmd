@@ -8,8 +8,6 @@
 ```sh
 npm ci
 npm run check
-npm run format
-npm run typecheck
 npm test
 ```
 
