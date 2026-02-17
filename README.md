@@ -74,6 +74,7 @@ compose-agentsmd apply-rules
 
 Ruleset files accept JSON with `//` or `/* */` comments.
 
+<!-- prettier-ignore -->
 ```jsonc
 {
   // Rules source. Use github:owner/repo@ref or a local path.
@@ -83,7 +84,7 @@ Ruleset files accept JSON with `//` or `/* */` comments.
   // Additional local rule files to append.
   "extra": ["agent-rules-local/custom.md"],
   // Output file name.
-  "output": "AGENTS.md",
+  "output": "AGENTS.md"
 }
 ```
 
