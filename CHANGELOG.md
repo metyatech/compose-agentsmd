@@ -2,6 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
+## 3.3.1 - 2026-02-18
+- Updated `ajv` in `package-lock.json` to `8.18.0` via `npm audit fix` to remediate a moderate advisory.
+
 ## 3.3.0 - 2026-02-18
 - Added ruleset-level `claude` companion settings (`enabled` / `output`) with schema validation.
 - Compose now generates a `CLAUDE.md` companion file by default with an `@...` import to the primary output.
