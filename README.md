@@ -2,6 +2,10 @@
 
 This repository contains CLI tooling for composing per-project `AGENTS.md` files from modular rule sets.
 
+## Compatibility
+
+- Node.js >= 20
+
 ## Release notes
 
 See `CHANGELOG.md` for release notes.
@@ -152,6 +156,9 @@ npm test
 ## Overview
 This repository contains the compose-agentsmd project.
 
-## Requirements and Configuration
-- No required environment variables are documented.
-
+## Documentation
+- [CHANGELOG.md](CHANGELOG.md)
+- [CONTRIBUTING.md](CONTRIBUTING.md)
+- [SECURITY.md](SECURITY.md)
+- [LICENSE](LICENSE)
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
