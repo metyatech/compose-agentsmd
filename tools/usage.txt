@@ -16,7 +16,7 @@ Options:
   --no-domains         Initialize with no domains
   --no-extra           Initialize without extra rule files
   --no-global          Initialize without global rules
-  --compose            Compose AGENTS.md after init
+  --compose            Compose output file(s) after init
   --dry-run            Show init plan without writing files
   --yes                Skip init confirmation prompt
   --force              Overwrite existing files during init

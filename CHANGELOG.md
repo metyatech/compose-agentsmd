@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 3.3.0 - 2026-02-18
+- Added ruleset-level `claude` companion settings (`enabled` / `output`) with schema validation.
+- Compose now generates a `CLAUDE.md` companion file by default with an `@...` import to the primary output.
+- Added opt-out support via `claude.enabled: false` and custom companion path support via `claude.output`.
+- Updated tests and README/usage docs for companion output behavior and JSON output lists.
+
 ## 3.2.7 - 2026-02-07
 - Print a unified diff for `AGENTS.md` when it changes during compose/apply-rules (works without git).
 - Suppress the diff/recognition hint output when using `--quiet` or `--json`.

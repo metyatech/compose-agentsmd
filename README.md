@@ -32,6 +32,8 @@ compose-agentsmd
 
 The tool reads `agent-ruleset.json` from the given root directory (default: current working directory), and writes the output file specified by the ruleset. If `output` is omitted, it defaults to `AGENTS.md`.
 
+By default, compose also writes a `CLAUDE.md` companion file containing an `@...` import pointing to the primary output file. You can disable this with `claude.enabled: false` in the ruleset.
+
 The tool prepends a small "Tool Rules" block to every generated `AGENTS.md` so agents know how to regenerate or update rules.
 Each composed rule section is also prefixed with the source file path that produced it.
 
@@ -51,6 +53,7 @@ Defaults:
 - `domains`: empty
 - `extra`: empty
 - `global`: omitted (defaults to `true`)
+- `claude`: `{ "enabled": true, "output": "CLAUDE.md" }`
 - `output`: `AGENTS.md`
 
 Use `--dry-run` to preview actions, `--force` to overwrite existing files, and `--compose` to generate `AGENTS.md` immediately.
@@ -84,6 +87,11 @@ Ruleset files accept JSON with `//` or `/* */` comments.
   "domains": ["node", "unreal"],
   // Additional local rule files to append.
   "extra": ["agent-rules-local/custom.md"],
+  // Optional Claude Code companion output.
+  "claude": {
+    "enabled": true,
+    "output": "CLAUDE.md"
+  },
   // Output file name.
   "output": "AGENTS.md"
 }
@@ -95,6 +103,9 @@ Ruleset keys:
 - `global` (optional): include `rules/global` (defaults to true). Omit this unless you want to disable globals.
 - `domains` (optional): domain folders under `rules/domains/<domain>`.
 - `extra` (optional): additional local rule files to append.
+- `claude` (optional): companion settings for Claude Code.
+- `claude.enabled` (optional): enable/disable companion generation (defaults to `true`).
+- `claude.output` (optional): companion file path (defaults to `CLAUDE.md`).
 - `output` (optional): output file name (defaults to `AGENTS.md`).
 
 ### Ruleset schema validation
@@ -121,7 +132,7 @@ Remote sources are cached under `~/.agentsmd/cache/<owner>/<repo>/<ref>/`. Use `
 - `--no-domains`: initialize with no domains
 - `--no-extra`: initialize without extra rule files
 - `--no-global`: initialize without global rules
-- `--compose`: compose `AGENTS.md` after `init`
+- `--compose`: compose output file(s) after `init`
 - `--dry-run`: show init plan without writing files
 - `--yes`: skip init confirmation prompt
 - `--force`: overwrite existing files during init
