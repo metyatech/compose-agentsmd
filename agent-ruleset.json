@@ -6,7 +6,8 @@
     "release"
   ],
   "extra": [
-    "agent-rules-local/compose-agentsmd-local.md"
+    "agent-rules-local/compose-agentsmd-local.md",
+    "agent-rules-local/release.md"
   ],
   "output": "AGENTS.md"
 }

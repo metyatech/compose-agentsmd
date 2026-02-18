@@ -514,3 +514,9 @@ Source: agent-rules-local/compose-agentsmd-local.md
 # Compose-Agentsmd Local Overrides
 
 - For this repository only, generate AGENTS.md using `npm run compose` (do not run `compose-agentsmd` directly).
+
+Source: agent-rules-local/release.md
+
+# Distribution and release
+
+- After publishing this repository, update the globally installed CLI to the latest version.

@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+- Added `agent-rules-local/release.md` to the local ruleset to ensure distribution and release rules are included in `AGENTS.md`.
+- Added a security workflow using `osv-scanner` for automated dependency vulnerability scanning.
+- Added `metyatech` to `package.json` keywords.
+
 ## 3.3.1 - 2026-02-18
 - Updated `ajv` in `package-lock.json` to `8.18.0` via `npm audit fix` to remediate a moderate advisory.
 

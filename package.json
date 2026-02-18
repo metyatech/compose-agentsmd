@@ -16,7 +16,8 @@
     "agentsmd",
     "rules",
     "cli",
-    "markdown"
+    "markdown",
+    "metyatech"
   ],
   "type": "module",
   "bin": {
