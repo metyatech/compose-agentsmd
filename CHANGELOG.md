@@ -2,6 +2,8 @@
 
 All notable changes to this project will be documented in this file.
 
+## 3.3.2 - 2026-02-20
+- Updated tool rules to require an ANSI-colored diff preview for planned rule changes, clarify the shared/global rules edit workflow, and remove final-response diff requirements.
 ## 3.3.1 - 2026-02-18
 - Updated `ajv` in `package-lock.json` to `8.18.0` via `npm audit fix` to remediate a moderate advisory.
 
