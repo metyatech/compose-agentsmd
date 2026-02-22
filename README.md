@@ -154,9 +154,11 @@ npm test
 ```
 
 ## Overview
+
 This repository contains the compose-agentsmd project.
 
 ## Documentation
+
 - [CHANGELOG.md](CHANGELOG.md)
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 - [SECURITY.md](SECURITY.md)
