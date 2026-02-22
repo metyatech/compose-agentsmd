@@ -1,7 +1,7 @@
 <!-- markdownlint-disable MD025 -->
 # Tool Rules (compose-agentsmd)
 
-- Before starting any work, run `compose-agentsmd` from the project root.
+- **Session gate**: before responding to ANY user message, run `compose-agentsmd` from the project root. AGENTS.md contains the rules you operate under; stale rules cause rule violations. If you discover you skipped this step mid-session, stop, run it immediately, re-read the diff, and adjust your behavior before continuing.
 - `compose-agentsmd` intentionally regenerates `AGENTS.md`; any resulting `AGENTS.md` diff is expected and must not be treated as an unexpected external change.
 - If `compose-agentsmd` is not available, install it via npm: `npm install -g compose-agentsmd`.
 - To update shared/global rules, use `compose-agentsmd edit-rules` to locate the writable rules workspace, make changes only in that workspace, then run `compose-agentsmd apply-rules` (do not manually clone or edit the rules source repo outside this workflow).
@@ -69,8 +69,9 @@ Source: github:metyatech/agent-rules@HEAD/rules/global/autonomous-operations.md
 - Do not preserve backward compatibility unless explicitly requested; avoid legacy aliases and compatibility shims by default.
 - When work reveals rule gaps, redundancy, or misplacement, proactively update rule modules/rulesets (including moves/renames) and regenerate AGENTS.md without waiting for explicit user requests.
 - After each task, briefly assess whether avoidable mistakes occurred. In direct mode, propose rule updates if warranted. In delegated mode, include improvement suggestions in the task result.
-- If you state a persistent workflow change (e.g., `from now on`, `I'll always`), immediately propose the corresponding rule update and request approval in the same task; do not leave it as an unrecorded promise. When operating under a multi-agent-delegation model, follow that rule module's guidance on restricted operations before proposing changes.
+- If you state a persistent workflow change (e.g., `from now on`, `I'll always`), immediately propose the corresponding rule update and request approval in the same task; do not leave it as an unrecorded promise. This is a blocking gate: do not proceed to the next task or close the response until the rule update is committed or explicitly deferred by the requester. When operating under a multi-agent-delegation model, follow that rule module's guidance on restricted operations before proposing changes.
 - Because session memory resets between tasks, treat rule files as persistent memory; when any issue or avoidable mistake occurs, update rules in the same task to prevent recurrence.
+- Never apply rules from memory of previous sessions; always reference the current AGENTS.md. If unsure whether a rule still applies, re-read it.
 - Treat these rules as the source of truth; do not override them with repository conventions. If a repo conflicts, update the repo to comply or update the rules to encode the exception; do not make undocumented exceptions.
 
 ## Skill role persistence
@@ -298,6 +299,15 @@ Source: github:metyatech/agent-rules@HEAD/rules/global/planning-and-approval-gat
 - Obviously implied follow-up includes: rebuild linked packages, restart local services, update global installs, and other post-change deployment steps covered by existing rules.
 - Re-request approval only when expanding beyond the original scope or when an action carries risk not covered by the original directive.
 
+## Reviewer proxy approval
+
+- When operating as an autonomous orchestrator with the user-proxy skill, the orchestrator MAY approve plans on behalf of the user for operations within user-owned repositories.
+- The reviewer proxy evaluates plans against all rules, known error patterns, and quality standards before approving.
+- If the reviewer proxy approves (all checklist items pass), proceed without human approval.
+- If the reviewer proxy flags concerns, escalate to the human user.
+- The human user may override or interrupt at any time; user messages always take priority.
+- Reviewer proxy does NOT apply to restricted operations (creating/deleting repositories, force-pushing, rewriting published git history, modifying rules) — these always require human approval per Multi-agent delegation rules.
+
 Source: github:metyatech/agent-rules@HEAD/rules/global/post-change-deployment.md
 
 # Post-change deployment
@@ -338,7 +348,8 @@ For AC definition, verification evidence, regression tests, and final reporting 
 - Enforce via CI: run the full suite on pull requests and on pushes to the default branch, and make it a required status check for merges; if no CI harness exists, add one using repo-standard commands.
 - Configure required status checks on the default branch when you have permission; otherwise report the limitation.
 - Do not rely on smoke-only gating or scheduled-only full runs for correctness; merges must require the full suite.
-- Ensure commit-time automation (pre-commit or repo-native) runs the full suite and blocks commits.
+- Ensure commit-time automation (pre-commit or repo-native) runs the full suite and blocks commits. This is a hard prerequisite: before making the first commit in a repository during a session, verify that pre-commit hooks are installed and functional; if not, install them before any other commits.
+- If pre-commit hooks cannot be installed (environment restriction, no supported tool), manually run the repo's full verify command before every commit and confirm it passes; do not proceed to `git commit` until verify succeeds.
 - Never disable checks, weaken assertions, loosen types, or add retries solely to make checks pass.
 - If the execution environment restricts test execution (no network, no database, sandboxed), run the available subset, document what was skipped, and ensure CI covers the remainder.
 
@@ -370,6 +381,19 @@ Source: github:metyatech/agent-rules@HEAD/rules/global/release-and-publication.m
 - Keep package version and Git tag consistent.
 - Run dependency security checks before release.
 - Verify published packages resolve and run correctly before reporting done.
+
+## Delivery chain gate
+
+Before reporting a code change as complete in a publishable package, verify the full delivery chain. Each step that applies must be done; do not stop mid-chain.
+
+1. Committed
+2. Pushed
+3. Version bumped (if publishable change)
+4. GitHub Release created
+5. Package published to registry
+6. Global/local install updated and verified
+
+If you discover you stopped mid-chain, resume from where you left off immediately — do not wait for the user to point it out.
 
 Source: github:metyatech/agent-rules@HEAD/rules/global/skill-authoring.md
 
@@ -414,6 +438,16 @@ Source: github:metyatech/agent-rules@HEAD/rules/global/skill-authoring.md
 - Keep instructions concise, action-oriented, and testable.
 - Do not duplicate rules already covered by AGENTS.md global rules
   (e.g., TDD, verification, planning gates); reference them instead.
+
+Source: github:metyatech/agent-rules@HEAD/rules/global/task-lifecycle-tracking.md
+
+# Task lifecycle tracking
+
+- When an actionable task emerges during a session, immediately record it with `task-tracker add` so it persists on disk regardless of session termination.
+- `task-tracker` is the persistent cross-session tracker; session-scoped task tools (e.g., TaskCreate) are supplementary. Always use `task-tracker add` first; session-scoped tools may be used in addition but never as a replacement.
+- At the start of any session that may involve state-changing work, run `task-tracker check` and report findings before starting new work.
+- When reporting a task as complete, state the lifecycle stage explicitly (committed/pushed/released/etc.); never claim "done" when downstream stages remain incomplete.
+- If `task-tracker` is not installed, install it via `npm install -g @metyatech/task-tracker` before proceeding.
 
 Source: github:metyatech/agent-rules@HEAD/rules/global/user-identity-and-accounts.md
 
