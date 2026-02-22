@@ -101,7 +101,6 @@ Source: github:metyatech/agent-rules@HEAD/rules/global/command-execution.md
 - If elevated privileges are required, use sudo where available; otherwise run as Administrator.
 - Keep changes scoped to affected repositories; when shared modules change, update consumers and verify at least one.
 - If no branch is specified, work on the current branch; direct commits to main/master are allowed.
-- After completing a PR, merge it, sync the target branch, and delete the PR branch locally and remotely.
 - Do not assume agent platform capabilities beyond what is available; fail explicitly when unavailable.
 
 Source: github:metyatech/agent-rules@HEAD/rules/global/delivery-hard-gates.md
@@ -343,25 +342,11 @@ For AC definition, verification evidence, regression tests, and final reporting 
 - Never disable checks, weaken assertions, loosen types, or add retries solely to make checks pass.
 - If the execution environment restricts test execution (no network, no database, sandboxed), run the available subset, document what was skipped, and ensure CI covers the remainder.
 
-## Tests (behavior changes)
+## Tests
 
 - Follow test-first: add/update tests, observe failure, implement the fix, then observe pass.
-- Cover success, failure, boundary, invalid input, and key state transitions (including first-run/cold-start vs subsequent-run behavior when relevant); include representative concurrency/retry/recovery when relevant.
 - Keep tests deterministic; minimize time/random/external I/O; inject when needed.
-- For deterministic output files, use full-content snapshot/golden tests.
-- Prefer making nondeterministic failures reproducible over adding sleeps/retries; do not mask flakiness.
-- For timing/order/race issues, prefer deterministic synchronization (events, versioned state, acks/handshakes) over fixed sleeps.
 - If a heuristic wait is unavoidable, it MUST be condition-based with a hard deadline and diagnostics, and requires explicit requester approval.
-- For integration boundaries (network/DB/external services/UI flows), add an integration/E2E/contract test that exercises the boundary; avoid unit-only coverage for integration bugs.
-- For non-trivial changes, create a small test matrix (scenarios × inputs × states) and cover the highest-risk combinations; document intentional gaps.
-
-## Feedback loops and root causes
-
-- Treat time-to-detect and time-to-fix as quality attributes; shorten the feedback loop with automation and observability rather than relying on manual QA.
-- For any defect fix or incident remediation, perform a brief root-cause classification: implementation mistake, design deficit, and/or ambiguous/incorrect requirements.
-- Feed the root cause upstream in the same change set: add or tighten tests/checks/alerts, update specs/acceptance criteria, and update design docs/ADRs when applicable.
-- If the failure should have been detected earlier, add a gate at the earliest reliable point (lint/typecheck/tests/CI required checks or runtime alerts/health checks); skipping this requires explicit user approval.
-- Record the prevention mechanism (what will catch it next time) in the PR description or issue comment; avoid "fixed" without a concrete feedback-loop improvement.
 
 ## Exceptions
 
