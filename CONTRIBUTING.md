@@ -1,27 +1,40 @@
 # Contributing
 
-## Development setup
-1. Install dependencies.
-2. Run lint and tests before submitting changes.
+Thank you for your interest in contributing to `compose-agentsmd`.
 
-```sh
-npm ci
-npm run lint
-npm test
+## Development setup
+
+```bash
+git clone https://github.com/metyatech/compose-agentsmd.git
+cd compose-agentsmd
+npm install
+npm run verify   # lint + format check + test
 ```
 
+## Submitting changes
+
+1. Fork the repository and create a feature branch.
+2. Add or update tests for any changed behavior.
+3. Run `npm run verify` and ensure all checks pass.
+4. Open a pull request with a clear description of the change.
+
+## Code style
+
+- TypeScript strict mode is required.
+- Format with Prettier (`npm run format`).
+- Lint with ESLint and tsc (`npm run lint`).
+
 ## Rules composition workflow
+
 This repository treats `AGENTS.md` as a generated file.
 
 - Do not edit `AGENTS.md` directly.
-- Update the source rule modules under `agent-rules/rules/`.
-- Regenerate with:
+- Update the source rule modules and regenerate with:
 
 ```sh
 npm run compose
 ```
 
-## Pull requests
-- Keep changes scoped to the affected repository.
-- Include tests for behavioral changes.
-- Update `README.md` when usage or behavior changes.
+## Scope
+
+This package covers **AGENTS.md composition only**. Keep PRs scoped to composition and rule-management concerns.

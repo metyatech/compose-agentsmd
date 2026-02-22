@@ -330,7 +330,7 @@ const stripJsonComments = (input: string): string => {
       continue;
     }
 
-    if (char === "\"" || char === "'") {
+    if (char === '"' || char === "'") {
       inString = true;
       stringChar = char;
       output += char;
@@ -430,7 +430,11 @@ const collectMarkdownFiles = (rootDir: string): string[] => {
   });
 };
 
-const addRulePaths = (rulePaths: string[], resolvedRules: string[], seenRules: Set<string>): void => {
+const addRulePaths = (
+  rulePaths: string[],
+  resolvedRules: string[],
+  seenRules: Set<string>
+): void => {
   for (const rulePath of rulePaths) {
     const resolvedRulePath = path.resolve(rulePath);
     if (seenRules.has(resolvedRulePath)) {
@@ -591,7 +595,9 @@ const resolveGithubRulesRoot = (
   }
 
   const cacheSegment =
-    resolvedRef === "HEAD" ? sanitizeCacheSegment(resolvedHash ?? resolvedRef) : sanitizeCacheSegment(resolvedRef);
+    resolvedRef === "HEAD"
+      ? sanitizeCacheSegment(resolvedHash ?? resolvedRef)
+      : sanitizeCacheSegment(resolvedRef);
   const cacheDir = path.join(DEFAULT_CACHE_ROOT, parsed.owner, parsed.repo, cacheSegment);
 
   if (refresh && fs.existsSync(cacheDir)) {
@@ -625,7 +631,8 @@ const resolveLocalRulesRoot = (rulesetDir: string, source: string): string => {
     throw new Error(`Missing source path: ${resolvedSource}`);
   }
 
-  const candidate = path.basename(resolvedSource) === "rules" ? resolvedSource : path.join(resolvedSource, "rules");
+  const candidate =
+    path.basename(resolvedSource) === "rules" ? resolvedSource : path.join(resolvedSource, "rules");
   ensureDirectoryExists(candidate);
   return candidate;
 };
@@ -696,7 +703,7 @@ const formatRuleSourcePath = (
 ): string => {
   // Check if this rule is from the resolved rulesRoot (GitHub or local source)
   const isFromSource = rulePath.startsWith(rulesRoot);
-  
+
   if (isFromSource && source.startsWith("github:")) {
     // GitHub source rule
     const parsed = parseGithubSource(source);
@@ -720,25 +727,41 @@ const resolveOutputPaths = (
   const companionEnabled = claude.enabled !== false;
   const configuredCompanionPath = resolveFrom(rulesetDir, claude.output ?? DEFAULT_CLAUDE_OUTPUT);
 
-  if (!companionEnabled || path.resolve(primaryOutputPath) === path.resolve(configuredCompanionPath)) {
+  if (
+    !companionEnabled ||
+    path.resolve(primaryOutputPath) === path.resolve(configuredCompanionPath)
+  ) {
     return { primaryOutputPath };
   }
 
   return { primaryOutputPath, companionOutputPath: configuredCompanionPath };
 };
 
-const buildClaudeCompanionContent = (primaryOutputPath: string, companionOutputPath: string): string => {
-  const relativeImportPath = normalizePath(path.relative(path.dirname(companionOutputPath), primaryOutputPath));
+const buildClaudeCompanionContent = (
+  primaryOutputPath: string,
+  companionOutputPath: string
+): string => {
+  const relativeImportPath = normalizePath(
+    path.relative(path.dirname(companionOutputPath), primaryOutputPath)
+  );
   return `@${relativeImportPath}\n`;
 };
 
-const composeRuleset = (rulesetPath: string, rootDir: string, options: ComposeOptions): ComposeResult => {
+const composeRuleset = (
+  rulesetPath: string,
+  rootDir: string,
+  options: ComposeOptions
+): ComposeResult => {
   const rulesetDir = path.dirname(rulesetPath);
   const projectRuleset = readProjectRuleset(rulesetPath);
   const { primaryOutputPath, companionOutputPath } = resolveOutputPaths(rulesetDir, projectRuleset);
   const composedOutputPath = normalizePath(path.relative(rootDir, primaryOutputPath));
 
-  const { rulesRoot, resolvedRef } = resolveRulesRoot(rulesetDir, projectRuleset.source, options.refresh ?? false);
+  const { rulesRoot, resolvedRef } = resolveRulesRoot(
+    rulesetDir,
+    projectRuleset.source,
+    options.refresh ?? false
+  );
   const globalRoot = path.join(rulesRoot, "global");
   const domainsRoot = path.join(rulesRoot, "domains");
 
@@ -761,7 +784,13 @@ const composeRuleset = (rulesetPath: string, rootDir: string, options: ComposeOp
 
   const parts = resolvedRules.map((rulePath) => {
     const body = normalizeTrailingWhitespace(fs.readFileSync(rulePath, "utf8"));
-    const sourcePath = formatRuleSourcePath(rulePath, rulesRoot, rulesetDir, projectRuleset.source, resolvedRef);
+    const sourcePath = formatRuleSourcePath(
+      rulePath,
+      rulesRoot,
+      rulesetDir,
+      projectRuleset.source,
+      resolvedRef
+    );
     return `Source: ${sourcePath}\n\n${body}`;
   });
 
@@ -786,7 +815,9 @@ const composeRuleset = (rulesetPath: string, rootDir: string, options: ComposeOp
 
   let agentsMdDiff: AgentsMdOutputDiff | undefined;
   if (options.emitAgentsMdDiff && path.basename(primaryOutputPath) === DEFAULT_OUTPUT) {
-    const before = fs.existsSync(primaryOutputPath) ? fs.readFileSync(primaryOutputPath, "utf8") : "";
+    const before = fs.existsSync(primaryOutputPath)
+      ? fs.readFileSync(primaryOutputPath, "utf8")
+      : "";
     if (before === primaryOutputContent) {
       agentsMdDiff = { status: "unchanged" };
     } else {
@@ -829,7 +860,9 @@ const printAgentsMdDiffIfPresent = (result: ComposeResult): void => {
     return;
   }
 
-  process.stdout.write("AGENTS.md updated. ACTION (agent): refresh rule recognition from the diff below.\n");
+  process.stdout.write(
+    "AGENTS.md updated. ACTION (agent): refresh rule recognition from the diff below.\n"
+  );
   process.stdout.write("--- BEGIN DIFF ---\n");
   if (result.agentsMdDiff.patch) {
     process.stdout.write(result.agentsMdDiff.patch);
@@ -884,25 +917,25 @@ const formatInitRuleset = (ruleset: ProjectRuleset): string => {
   const claudeOutput = ruleset.claude?.output ?? DEFAULT_CLAUDE_OUTPUT;
   const lines = [
     "{",
-    '  // Rules source. Use github:owner/repo@ref or a local path.',
+    "  // Rules source. Use github:owner/repo@ref or a local path.",
     `  "source": "${ruleset.source}",`,
-    '  // Domain folders under rules/domains.',
+    "  // Domain folders under rules/domains.",
     `  "domains": ${domainsValue},`,
-    '  // Additional local rule files to append.',
+    "  // Additional local rule files to append.",
     `  "extra": ${extraValue},`
   ];
 
   if (ruleset.global === false) {
-    lines.push('  // Include rules/global from the source.');
+    lines.push("  // Include rules/global from the source.");
     lines.push('  "global": false,');
   }
 
-  lines.push('  // Claude Code companion output settings.');
+  lines.push("  // Claude Code companion output settings.");
   lines.push('  "claude": {');
   lines.push(`    "enabled": ${claudeEnabled ? "true" : "false"},`);
   lines.push(`    "output": "${claudeOutput}"`);
   lines.push("  },");
-  lines.push('  // Output file name.');
+  lines.push("  // Output file name.");
   lines.push(`  "output": "${ruleset.output ?? DEFAULT_OUTPUT}"`);
   lines.push("}");
 
@@ -935,7 +968,9 @@ const confirmInit = async (args: CliArgs): Promise<void> => {
 };
 
 const initProject = async (args: CliArgs, rootDir: string, rulesetName: string): Promise<void> => {
-  const rulesetPath = args.ruleset ? resolveFrom(rootDir, args.ruleset) : path.join(rootDir, rulesetName);
+  const rulesetPath = args.ruleset
+    ? resolveFrom(rootDir, args.ruleset)
+    : path.join(rootDir, rulesetName);
   const rulesetDir = path.dirname(rulesetPath);
   const ruleset = buildInitRuleset(args);
   const outputPaths = resolveOutputPaths(rulesetDir, ruleset);
@@ -975,7 +1010,9 @@ const initProject = async (args: CliArgs, rootDir: string, rulesetName: string):
     for (const composedTarget of composedTargets) {
       if (fs.existsSync(composedTarget)) {
         if (!args.force) {
-          throw new Error(`Output already exists: ${normalizePath(composedTarget)} (use --force to overwrite)`);
+          throw new Error(
+            `Output already exists: ${normalizePath(composedTarget)} (use --force to overwrite)`
+          );
         }
         plan.push({ action: "overwrite", path: composedTarget });
       } else {
@@ -1032,7 +1069,9 @@ const initProject = async (args: CliArgs, rootDir: string, rulesetName: string):
       JSON.stringify(
         {
           initialized: [normalizePath(path.relative(rootDir, rulesetPath))],
-          localRules: extraToWrite.map((filePath) => normalizePath(path.relative(rootDir, filePath))),
+          localRules: extraToWrite.map((filePath) =>
+            normalizePath(path.relative(rootDir, filePath))
+          ),
           composed: composedOutput ? composedOutput.outputs : [],
           dryRun: false
         },
@@ -1041,7 +1080,9 @@ const initProject = async (args: CliArgs, rootDir: string, rulesetName: string):
       ) + "\n"
     );
   } else if (!args.quiet) {
-    process.stdout.write(`Initialized ruleset:\n- ${normalizePath(path.relative(rootDir, rulesetPath))}\n`);
+    process.stdout.write(
+      `Initialized ruleset:\n- ${normalizePath(path.relative(rootDir, rulesetPath))}\n`
+    );
     if (extraToWrite.length > 0) {
       process.stdout.write(
         `Initialized local rules:\n${extraToWrite
@@ -1050,13 +1091,19 @@ const initProject = async (args: CliArgs, rootDir: string, rulesetName: string):
       );
     }
     if (composedOutput) {
-      process.stdout.write(`Composed AGENTS.md:\n${composedOutput.outputs.map((filePath) => `- ${filePath}`).join("\n")}\n`);
+      process.stdout.write(
+        `Composed AGENTS.md:\n${composedOutput.outputs.map((filePath) => `- ${filePath}`).join("\n")}\n`
+      );
       printAgentsMdDiffIfPresent(composedOutput);
     }
   }
 };
 
-const getRulesetFiles = (rootDir: string, specificRuleset: string | undefined, rulesetName: string): string[] => {
+const getRulesetFiles = (
+  rootDir: string,
+  specificRuleset: string | undefined,
+  rulesetName: string
+): string[] => {
   if (specificRuleset) {
     const resolved = resolveFrom(rootDir, specificRuleset);
     ensureFileExists(resolved);
@@ -1070,7 +1117,11 @@ const getRulesetFiles = (rootDir: string, specificRuleset: string | undefined, r
   return [defaultRuleset];
 };
 
-const ensureSingleRuleset = (rulesetFiles: string[], rootDir: string, rulesetName: string): string => {
+const ensureSingleRuleset = (
+  rulesetFiles: string[],
+  rootDir: string,
+  rulesetName: string
+): string => {
   if (rulesetFiles.length === 0) {
     const expectedPath = normalizePath(path.join(rootDir, rulesetName));
     throw new Error(`Missing ruleset file: ${expectedPath}`);
@@ -1159,9 +1210,13 @@ const main = async (): Promise<void> => {
       emitAgentsMdDiff: !args.quiet && !args.json
     });
     if (args.json) {
-      process.stdout.write(JSON.stringify({ composed: output.outputs, dryRun: !!args.dryRun }, null, 2) + "\n");
+      process.stdout.write(
+        JSON.stringify({ composed: output.outputs, dryRun: !!args.dryRun }, null, 2) + "\n"
+      );
     } else if (!args.quiet) {
-      process.stdout.write(`Composed AGENTS.md:\n${output.outputs.map((filePath) => `- ${filePath}`).join("\n")}\n`);
+      process.stdout.write(
+        `Composed AGENTS.md:\n${output.outputs.map((filePath) => `- ${filePath}`).join("\n")}\n`
+      );
       printAgentsMdDiffIfPresent(output);
     }
     return;
@@ -1172,22 +1227,29 @@ const main = async (): Promise<void> => {
     throw new Error(`Missing ruleset file: ${expectedPath}`);
   }
 
-  const outputs = rulesetFiles
-    .sort()
-    .map((rulesetPath) =>
-      composeRuleset(rulesetPath, rootDir, {
-        refresh: args.refresh,
-        dryRun: args.dryRun,
-        emitAgentsMdDiff: !args.quiet && !args.json
-      })
-    );
+  const outputs = rulesetFiles.sort().map((rulesetPath) =>
+    composeRuleset(rulesetPath, rootDir, {
+      refresh: args.refresh,
+      dryRun: args.dryRun,
+      emitAgentsMdDiff: !args.quiet && !args.json
+    })
+  );
 
   if (args.json) {
     process.stdout.write(
-      JSON.stringify({ composed: outputs.flatMap((result) => result.outputs), dryRun: !!args.dryRun }, null, 2) + "\n"
+      JSON.stringify(
+        { composed: outputs.flatMap((result) => result.outputs), dryRun: !!args.dryRun },
+        null,
+        2
+      ) + "\n"
     );
   } else if (!args.quiet) {
-    process.stdout.write(`Composed AGENTS.md:\n${outputs.flatMap((result) => result.outputs).map((filePath) => `- ${filePath}`).join("\n")}\n`);
+    process.stdout.write(
+      `Composed AGENTS.md:\n${outputs
+        .flatMap((result) => result.outputs)
+        .map((filePath) => `- ${filePath}`)
+        .join("\n")}\n`
+    );
     for (const result of outputs) {
       printAgentsMdDiffIfPresent(result);
     }
