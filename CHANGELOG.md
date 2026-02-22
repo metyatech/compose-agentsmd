@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## 3.4.1 - 2026-02-22
+
+- Strengthened the `compose-agentsmd` session gate rule: explains why stale rules cause violations, mandates execution before ANY user message, and prescribes stop-and-fix behavior on violation.
+
 ## 3.4.0 - 2026-02-22
 
 - Added ESLint flat config and Prettier for code quality enforcement.
