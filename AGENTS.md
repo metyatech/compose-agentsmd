@@ -16,85 +16,46 @@ Source: github:metyatech/agent-rules@HEAD/rules/global/agent-rules-composition.m
 
 # Rule composition and maintenance
 
-## Scope and composition
+- AGENTS.md is self-contained; place at project root. Shared rules centrally; project-local only for truly local policies.
+- Before work in a repo with `agent-ruleset.json`, run `compose-agentsmd` to refresh AGENTS.md.
+- Pre-commit hooks run `compose-agentsmd --compose` and auto-stage. Do not fail commits on drift or add freshness checks to CI.
 
-- AGENTS.md is self-contained; do not rely on parent/child AGENTS for inheritance or precedence.
-- Maintain shared rules centrally and compose per project; use project-local rules only for truly local policies.
-- Place AGENTS.md at the project root; only add another AGENTS.md for nested independent projects.
-- Before doing any work in a repository that contains `agent-ruleset.json`, run `compose-agentsmd` in that repository to refresh its AGENTS.md and ensure rules are current.
+## Update and editing
 
-## AGENTS.md freshness
-
-- Pre-commit hooks should run `compose-agentsmd --compose` and stage any AGENTS.md changes automatically. Do not fail the commit on AGENTS.md drift; let the updated file be included in the commit.
-- Do not add AGENTS.md freshness checks to CI. AGENTS.md is generated from external rule sources; checking it in CI creates cross-repo coupling. Pre-commit hooks are sufficient.
-
-## Update policy
-
-- Never edit AGENTS.md directly; update source rules and regenerate AGENTS.md.
-- A request to "update rules" means: update the appropriate rule module and ruleset, then regenerate AGENTS.md.
-- If the user gives a persistent instruction (e.g., "always", "must"), encode it in the appropriate module (global vs local).
-- When acknowledging a new persistent instruction, update the rule module in the same change set and regenerate AGENTS.md.
-- When creating a new repository, verify that it meets all applicable global rules before reporting completion: rule files and AGENTS.md, CI workflow, linting/formatting, community health files, documentation, and dependency scanning. Do not treat repository creation as complete until full compliance is verified.
-- When updating rules, infer the core intent; if it is a global policy, record it in global rules rather than project-local rules.
-- If a task requires domain rules not listed in agent-ruleset.json, update the ruleset to include them and regenerate AGENTS.md before proceeding.
-- Do not include composed `AGENTS.md` diffs in the final response unless the user explicitly asks for them.
-
-## Editing standards
-
-- Keep rules MECE, concise, and non-redundant.
-- Use short, action-oriented bullets; avoid numbered lists unless order matters.
-- Prefer the most general applicable rule to avoid duplication.
-- Write rules as clear directives that prescribe specific behavior ("do X", "always Y", "never Z"). Do not use hedging language ("may", "might", "could", "consider") — if a behavior is required, state it as a requirement; if it is not required, omit it.
-- Do not use numeric filename prefixes (e.g., `00-...`) to impose ordering; treat rule modules as a flat set. If ordering matters, encode it explicitly in composition/tooling rather than filenames.
-
-## Rule placement (global vs domain)
-
-- Decide rule placement based on **where the rule is needed**, not what topic it covers.
-- If the rule could be needed from any workspace or repository, make it global.
-- Only use domain rules when the rule is strictly relevant inside repositories that opt in to that domain.
-- Before choosing domain, verify: "Will this rule ever be needed when working from a workspace that does not include this domain?" If yes, make it global.
+- Never edit AGENTS.md directly; update source rules and regenerate. "Update rules" = update module/ruleset, then regenerate.
+- Persistent user instructions → encode in appropriate module (global vs local) in the same change set.
+- New repos must meet all global rules (AGENTS.md, CI, linting, community health, docs, scanning) before reporting complete.
+- Update rulesets for missing domain rules before proceeding. Omit AGENTS.md diffs unless asked.
+- Infer core intent; prefer global over project-local. Keep rules MECE, concise, non-redundant, action-oriented ("do X", "never Z"). No hedging or numeric filename prefixes.
+- Placement: based on where needed. Any-workspace → global; domain only for opt-in repos.
 
 ## Size budget
 
-- Global rules total: ≤350 lines. Individual module: ≤30 lines (soft target).
-- Exceeding the budget signals procedural content that belongs in a skill; extract before merging.
-
-## Rules vs skills
-
-- **Rules** = invariants/constraints (always loaded, concise). **Skills** = procedures/workflows (on-demand, detailed). When a rule grows with procedural content, extract to a skill.
+- Total ≤350 lines; per-module ≤30 (soft). Overage → extract procedural content to skills.
+- **Rules** = invariants (always loaded, concise). **Skills** = procedures (on-demand, detailed).
 
 Source: github:metyatech/agent-rules@HEAD/rules/global/autonomous-operations.md
 
 # Autonomous operations
 
 - Optimize for minimal human effort; default to automation over manual steps.
-- Drive work from the desired outcome: choose the highest-quality safe path that satisfies the requested quality/ideal bar, and execute end-to-end.
-- Treat speed as a secondary optimization; never trade down correctness, safety, robustness, or verifiability unless the requester explicitly approves that tradeoff.
-- Assume end-to-end autonomy for repository operations (issue triage, PRs, direct pushes to main/master, merges, releases, repo admin) only within repositories under the user's control (e.g., owned by metyatech or where the user has explicit maintainer/push authority), unless the user restricts scope; for third-party repos, require explicit user request before any of these operations.
-- Do not preserve backward compatibility unless explicitly requested; avoid legacy aliases and compatibility shims by default.
-- When work reveals rule gaps, redundancy, or misplacement, proactively update rule modules/rulesets (including moves/renames) and regenerate AGENTS.md without waiting for explicit user requests.
-- Continuously evaluate your own behavior, rules, and skills during operation. When you identify a gap, ambiguity, inefficiency, or missing guidance — whether through self-observation, task friction, or comparison with ideal behavior — update the appropriate rule or skill immediately without waiting for the user to notice or point out the issue. After each task, assess whether avoidable mistakes occurred and apply corrections in the same task. In delegated mode, include improvement suggestions in the task result.
-- When the user points out a behavior failure, treat it as a systemic gap: fix the immediate issue, update rules to prevent recurrence, and identify whether the same gap pattern applies elsewhere — all in a single action. Do not wait for the user to enumerate each corrective step; a single observation implies all necessary corrections.
-- If you state a persistent workflow change (e.g., `from now on`, `I'll always`), immediately propose the corresponding rule update and request approval in the same task; do not leave it as an unrecorded promise. This is a blocking gate: do not proceed to the next task or close the response until the rule update is committed or explicitly deferred by the requester. When operating under a multi-agent-delegation model, follow that rule module's guidance on restricted operations before proposing changes.
-- Because session memory resets between tasks, treat rule files as persistent memory; when any issue or avoidable mistake occurs, update rules in the same task to prevent recurrence.
-- Never apply rules from memory of previous sessions; always reference the current AGENTS.md. If unsure whether a rule still applies, re-read it.
-- Treat these rules as the source of truth; do not override them with repository conventions. If a repo conflicts, update the repo to comply or update the rules to encode the exception; do not make undocumented exceptions.
-
-## Skill role persistence
-
-- When the `manager` skill is invoked in a session, treat its role as session-scoped and continue operating as a manager/orchestrator for the remainder of the session.
-- Do not revert to a direct-implementation posture mid-session unless the user explicitly asks to stop using the manager role/skill or selects a different role.
-
-- When something is unclear, investigate to resolve it; do not proceed with unresolved material uncertainty. If still unclear, ask and include what you checked.
-- Do not proceed based on assumptions or guesses without explicit user approval; hypotheses may be discussed but must not drive action.
-- Make decisions explicit when they affect scope, risk, cost, or irreversibility.
-- Prefer asynchronous, low-friction control channels (GitHub Issues/PR comments) unless a repository mandates another.
-- Design autonomous workflows for high volume: queue requests, set concurrency limits, and auto-throttle to prevent overload.
+- Drive work from the desired outcome: choose the highest-quality safe path and execute end-to-end.
+- Correctness, safety, robustness, verifiability > speed unless requester explicitly approves the tradeoff.
+- End-to-end repo autonomy (issues, PRs, pushes, merges, releases, admin) within user-controlled repos; third-party repos require explicit request.
+- No backward compatibility unless requested; no legacy aliases or shims.
+- Proactively fix rule gaps, redundancy, or misplacement; regenerate AGENTS.md without waiting.
+- Self-evaluate continuously; fix rule/skill gaps immediately on discovery. In delegated mode, include improvement suggestions in the task result.
+- On user-reported failures: treat as systemic — fix, update rules, check for same pattern elsewhere, in one action.
+- Persistent workflow promises → propose rule update immediately (blocking gate). In delegated mode, follow that module's restricted-operations guidance.
+- Session memory resets; use rule files as persistent memory. Always reference current AGENTS.md, never from memory.
+- Rules are source of truth; update conflicting repos to comply or encode the exception.
+- When the `manager` skill is invoked, maintain that role for the session unless user explicitly stops it.
+- Investigate unclear items before proceeding; no assumptions without approval. Make scope/risk/cost/irreversibility decisions explicit.
+- Prefer async control channels (GitHub Issues/PR comments). Design high-volume workflows with queuing and throttling.
 
 ## GitHub notifications
 
-- After addressing a GitHub notification (CI failure fixed, PR reviewed, issue resolved), mark it as done using the GraphQL `markNotificationsAsDone` mutation.
-- Detailed notification management procedures (API commands, pagination) are in the `manager` skill.
+- After addressing a notification, mark as done via GraphQL `markNotificationsAsDone`. Detailed procedures in the `manager` skill.
 
 Source: github:metyatech/agent-rules@HEAD/rules/global/cli-standards.md
 
