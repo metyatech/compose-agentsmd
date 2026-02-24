@@ -45,6 +45,9 @@ type CliArgs = {
 const TOOL_RULES_PATH = new URL("../tools/tool-rules.md", import.meta.url);
 const USAGE_PATH = new URL("../tools/usage.txt", import.meta.url);
 
+const DEFAULT_TOTAL_BUDGET = 350;
+const DEFAULT_MODULE_BUDGET = 30;
+
 const readValueArg = (remaining: string[], index: number, flag: string): string => {
   const value = remaining[index + 1];
   if (!value) {
@@ -358,6 +361,10 @@ type ProjectRuleset = {
     enabled?: boolean;
     output?: string;
   };
+  budget?: {
+    totalLines?: number;
+    moduleLines?: number;
+  };
 };
 
 const readProjectRuleset = (rulesetPath: string): ProjectRuleset => {
@@ -457,10 +464,19 @@ type AgentsMdOutputDiff = {
   patch?: string;
 };
 
+type BudgetCheckResult = {
+  totalLines: number;
+  totalBudget: number;
+  moduleBudget: number;
+  overBudgetModules: Array<{ name: string; lines: number }>;
+  exceeded: boolean;
+};
+
 type ComposeResult = {
   output: string;
   outputs: string[];
   agentsMdDiff?: AgentsMdOutputDiff;
+  budgetResult: BudgetCheckResult;
 };
 
 const sanitizeCacheSegment = (value: string): string => value.replace(/[\\/]/gu, "__");
@@ -782,6 +798,26 @@ const composeRuleset = (
   const directRulePaths = extraRules.map((rulePath) => resolveFrom(rulesetDir, rulePath));
   addRulePaths(directRulePaths, resolvedRules, seenRules);
 
+  const totalBudget = projectRuleset.budget?.totalLines ?? DEFAULT_TOTAL_BUDGET;
+  const moduleBudget = projectRuleset.budget?.moduleLines ?? DEFAULT_MODULE_BUDGET;
+  const normalizedGlobalRoot = normalizePath(path.resolve(globalRoot));
+  const globalRuleFiles = resolvedRules.filter((p) =>
+    normalizePath(p).startsWith(`${normalizedGlobalRoot}/`)
+  );
+  const moduleLineCounts = globalRuleFiles.map((filePath) => {
+    const content = fs.readFileSync(filePath, "utf8");
+    return { name: path.basename(filePath), lines: content.split("\n").length };
+  });
+  const totalLines = moduleLineCounts.reduce((sum, m) => sum + m.lines, 0);
+  const overBudgetModules = moduleLineCounts.filter((m) => m.lines > moduleBudget);
+  const budgetResult: BudgetCheckResult = {
+    totalLines,
+    totalBudget,
+    moduleBudget,
+    overBudgetModules,
+    exceeded: totalLines > totalBudget || overBudgetModules.length > 0
+  };
+
   const parts = resolvedRules.map((rulePath) => {
     const body = normalizeTrailingWhitespace(fs.readFileSync(rulePath, "utf8"));
     const sourcePath = formatRuleSourcePath(
@@ -846,7 +882,8 @@ const composeRuleset = (
   return {
     output: composedOutputPath,
     outputs: composedFiles.map((file) => file.relativePath),
-    agentsMdDiff
+    agentsMdDiff,
+    budgetResult
   };
 };
 
@@ -871,6 +908,21 @@ const printAgentsMdDiffIfPresent = (result: ComposeResult): void => {
     }
   }
   process.stdout.write("--- END DIFF ---\n");
+};
+
+const formatBudgetWarning = (result: BudgetCheckResult): string => {
+  const totalInfo =
+    result.totalLines > result.totalBudget
+      ? `: ${result.totalLines}/${result.totalBudget} lines`
+      : "";
+  const lines = [`⚠ Global rules budget exceeded${totalInfo}`];
+  if (result.overBudgetModules.length > 0) {
+    lines.push(`  Over-budget modules (>${result.moduleBudget} lines):`);
+    for (const mod of result.overBudgetModules) {
+      lines.push(`    ${mod.name}: ${mod.lines} lines`);
+    }
+  }
+  return `${lines.join("\n")}\n`;
 };
 
 type InitPlanItem = {
@@ -1073,7 +1125,8 @@ const initProject = async (args: CliArgs, rootDir: string, rulesetName: string):
             normalizePath(path.relative(rootDir, filePath))
           ),
           composed: composedOutput ? composedOutput.outputs : [],
-          dryRun: false
+          dryRun: false,
+          ...(composedOutput ? { budget: composedOutput.budgetResult } : {})
         },
         null,
         2
@@ -1095,6 +1148,9 @@ const initProject = async (args: CliArgs, rootDir: string, rulesetName: string):
         `Composed AGENTS.md:\n${composedOutput.outputs.map((filePath) => `- ${filePath}`).join("\n")}\n`
       );
       printAgentsMdDiffIfPresent(composedOutput);
+      if (composedOutput.budgetResult.exceeded) {
+        process.stderr.write(formatBudgetWarning(composedOutput.budgetResult));
+      }
     }
   }
 };
@@ -1211,13 +1267,20 @@ const main = async (): Promise<void> => {
     });
     if (args.json) {
       process.stdout.write(
-        JSON.stringify({ composed: output.outputs, dryRun: !!args.dryRun }, null, 2) + "\n"
+        JSON.stringify(
+          { composed: output.outputs, dryRun: !!args.dryRun, budget: output.budgetResult },
+          null,
+          2
+        ) + "\n"
       );
     } else if (!args.quiet) {
       process.stdout.write(
         `Composed AGENTS.md:\n${output.outputs.map((filePath) => `- ${filePath}`).join("\n")}\n`
       );
       printAgentsMdDiffIfPresent(output);
+      if (output.budgetResult.exceeded) {
+        process.stderr.write(formatBudgetWarning(output.budgetResult));
+      }
     }
     return;
   }
@@ -1238,7 +1301,11 @@ const main = async (): Promise<void> => {
   if (args.json) {
     process.stdout.write(
       JSON.stringify(
-        { composed: outputs.flatMap((result) => result.outputs), dryRun: !!args.dryRun },
+        {
+          composed: outputs.flatMap((result) => result.outputs),
+          dryRun: !!args.dryRun,
+          budget: outputs[0].budgetResult
+        },
         null,
         2
       ) + "\n"
@@ -1252,6 +1319,11 @@ const main = async (): Promise<void> => {
     );
     for (const result of outputs) {
       printAgentsMdDiffIfPresent(result);
+    }
+    for (const result of outputs) {
+      if (result.budgetResult.exceeded) {
+        process.stderr.write(formatBudgetWarning(result.budgetResult));
+      }
     }
   }
 };

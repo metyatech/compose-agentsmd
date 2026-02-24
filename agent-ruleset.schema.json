@@ -42,6 +42,20 @@
         "type": "string",
         "minLength": 1
       }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "totalLines": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "moduleLines": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
     }
   }
 }
