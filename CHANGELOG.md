@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## 3.5.1 - 2026-02-25
+
+- Regenerated `AGENTS.md` with the latest shared global rule updates.
+- Updated composed rules to explicitly treat `compose-agentsmd`-generated `AGENTS.md` diffs as intentional changes and stage them by default in git-managed repositories unless explicitly excluded.
+
 ## 3.4.2 - 2026-02-23
 
 - Fixed formatting issues: blank lines, trailing whitespace, and JSON compaction in community health files and ruleset.
