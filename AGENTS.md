@@ -148,6 +148,7 @@ Source: github:metyatech/agent-rules@HEAD/rules/global/implementation-and-coding
 - Do not assume machine-specific environments; use repo-relative paths and explicit configuration.
 - Agent temp files MUST stay under OS temp unless requester approves.
 - For agent-facing tools/services, design for cross-agent compatibility via standard interfaces (CLI, HTTP, stdin/stdout, MCP).
+- Lifecycle install hooks (`prepare`/`preinstall`/`postinstall`) must succeed on a clean machine with no global tool assumptions; invoke required CLIs through project-local dependencies or package-manager executors (for npm, prefer `npm exec`).
 - After manifest changes, regenerate and commit corresponding lock files in the same commit.
 
 Source: github:metyatech/agent-rules@HEAD/rules/global/linting-formatting-and-static-analysis.md
@@ -171,6 +172,7 @@ Source: github:metyatech/agent-rules@HEAD/rules/global/model-inventory.md
 - Before spawning sub-agents, run `ai-quota` to check availability.
 - Always explicitly specify `model` and `effort` from the model inventory when spawning agents; never rely on defaults.
 - The full model inventory with agent tables, routing principles, and quota fallback logic is maintained in the `manager` skill.
+- **Orchestrator model**: When spawning an orchestrator (manager/autonomous-orchestrator role), default to `claude-sonnet-4-6`; use Opus only when the task explicitly requires maximum reasoning depth. Sonnet has an independent quota pool and is ~3× faster, making it the preferred choice for coordination and delegation work.
 
 Source: github:metyatech/agent-rules@HEAD/rules/global/multi-agent-delegation.md
 

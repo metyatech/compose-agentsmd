@@ -65,7 +65,8 @@
     "diff": "^8.0.3"
   },
   "overrides": {
-    "minimatch": "^10.2.2"
+    "minimatch": "^10.2.4",
+    "rollup": "^4.59.0"
   },
   "lint-staged": {
     "**/*.ts": [
