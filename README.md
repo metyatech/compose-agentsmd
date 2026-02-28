@@ -90,10 +90,10 @@ Ruleset files accept JSON with `//` or `/* */` comments.
   // Optional Claude Code companion output.
   "claude": {
     "enabled": true,
-    "output": "CLAUDE.md"
+    "output": "CLAUDE.md",
   },
   // Output file name.
-  "output": "AGENTS.md"
+  "output": "AGENTS.md",
 }
 ```
 
@@ -150,8 +150,9 @@ npm test
 ```
 
 ## Overview
+
 This repository contains the compose-agentsmd project.
 
 ## Requirements and Configuration
-- No required environment variables are documented.
 
+- No required environment variables are documented.
