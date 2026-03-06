@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## 3.3.2 - 2026-03-06
+- Added CodeQL analysis workflow for JavaScript and TypeScript.
+- Removed obsolete `cli` and `release` domain references from `agent-ruleset.json` to fix composition errors caused by upstream rule changes.
+- Regenerated `AGENTS.md` with updated rules from the shared source.
+
 ## 3.3.1 - 2026-02-18
 - Updated `ajv` in `package-lock.json` to `8.18.0` via `npm audit fix` to remediate a moderate advisory.
 
