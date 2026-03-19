@@ -11,6 +11,14 @@ import { createTwoFilesPatch } from "diff";
 const DEFAULT_RULESET_NAME = "agent-ruleset.json";
 const DEFAULT_OUTPUT = "AGENTS.md";
 const DEFAULT_CLAUDE_OUTPUT = "CLAUDE.md";
+const DEFAULT_CODEX_GLOBAL_OUTPUT = path.join(os.homedir(), ".codex", "AGENTS.md");
+const DEFAULT_CLAUDE_GLOBAL_OUTPUT = path.join(os.homedir(), ".claude", "CLAUDE.md");
+const DEFAULT_GEMINI_GLOBAL_OUTPUT = path.join(os.homedir(), ".gemini", "GEMINI.md");
+const DEFAULT_COPILOT_GLOBAL_OUTPUT = path.join(
+  os.homedir(),
+  ".copilot",
+  "copilot-instructions.md"
+);
 const DEFAULT_CACHE_ROOT = path.join(os.homedir(), ".agentsmd", "cache");
 const DEFAULT_WORKSPACE_ROOT = path.join(os.homedir(), ".agentsmd", "workspace");
 const DEFAULT_INIT_SOURCE = "github:owner/repo@latest";
@@ -47,6 +55,7 @@ const USAGE_PATH = new URL("../tools/usage.txt", import.meta.url);
 
 const DEFAULT_TOTAL_BUDGET = 350;
 const DEFAULT_MODULE_BUDGET = 30;
+const LINT_HEADER = "<!-- markdownlint-disable MD025 -->";
 
 const readValueArg = (remaining: string[], index: number, flag: string): string => {
   const value = remaining[index + 1];
@@ -247,6 +256,26 @@ const resolveFrom = (baseDir: string, targetPath: string): string => {
   }
 
   return path.resolve(baseDir, targetPath);
+};
+
+const isSubPath = (baseDir: string, targetPath: string): boolean => {
+  const relativePath = path.relative(path.resolve(baseDir), path.resolve(targetPath));
+  return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
+};
+
+const toDisplayPath = (rootDir: string, filePath: string): string => {
+  if (isSubPath(rootDir, filePath)) {
+    const relativePath = path.relative(rootDir, filePath);
+    return normalizePath(relativePath || path.basename(filePath));
+  }
+
+  const homeDir = os.homedir();
+  if (isSubPath(homeDir, filePath)) {
+    const relativeToHome = normalizePath(path.relative(homeDir, filePath));
+    return relativeToHome ? `~/${relativeToHome}` : "~";
+  }
+
+  return normalizePath(path.resolve(filePath));
 };
 
 const ensureDir = (dirPath: string): void => {
@@ -456,10 +485,14 @@ const addRulePaths = (
 type ComposeOptions = {
   refresh?: boolean;
   dryRun?: boolean;
-  emitAgentsMdDiff?: boolean;
+  emitDiffs?: boolean;
 };
 
-type AgentsMdOutputDiff = {
+type OutputScope = "repository" | "global";
+
+type OutputGroupDiff = {
+  scope: OutputScope;
+  targets: string[];
   status: "unchanged" | "updated";
   patch?: string;
 };
@@ -475,7 +508,9 @@ type BudgetCheckResult = {
 type ComposeResult = {
   output: string;
   outputs: string[];
-  agentsMdDiff?: AgentsMdOutputDiff;
+  repositoryOutputs: string[];
+  globalOutputs: string[];
+  outputDiffs: OutputGroupDiff[];
   budgetResult: BudgetCheckResult;
 };
 
@@ -734,23 +769,35 @@ const formatRuleSourcePath = (
   return result;
 };
 
+const getGlobalOutputPaths = (): string[] => [
+  DEFAULT_CODEX_GLOBAL_OUTPUT,
+  DEFAULT_CLAUDE_GLOBAL_OUTPUT,
+  DEFAULT_GEMINI_GLOBAL_OUTPUT,
+  DEFAULT_COPILOT_GLOBAL_OUTPUT
+];
+
 const resolveOutputPaths = (
   rulesetDir: string,
   projectRuleset: ProjectRuleset
-): { primaryOutputPath: string; companionOutputPath?: string } => {
+): { primaryOutputPath: string; companionOutputPath?: string; globalOutputPaths: string[] } => {
   const primaryOutputPath = resolveFrom(rulesetDir, projectRuleset.output ?? DEFAULT_OUTPUT);
   const claude = projectRuleset.claude ?? {};
   const companionEnabled = claude.enabled !== false;
   const configuredCompanionPath = resolveFrom(rulesetDir, claude.output ?? DEFAULT_CLAUDE_OUTPUT);
+  const globalOutputPaths = projectRuleset.global === false ? [] : getGlobalOutputPaths();
 
   if (
     !companionEnabled ||
     path.resolve(primaryOutputPath) === path.resolve(configuredCompanionPath)
   ) {
-    return { primaryOutputPath };
+    return { primaryOutputPath, globalOutputPaths };
   }
 
-  return { primaryOutputPath, companionOutputPath: configuredCompanionPath };
+  return {
+    primaryOutputPath,
+    companionOutputPath: configuredCompanionPath,
+    globalOutputPaths
+  };
 };
 
 const buildClaudeCompanionContent = (
@@ -763,6 +810,61 @@ const buildClaudeCompanionContent = (
   return `@${relativeImportPath}\n`;
 };
 
+const buildInstructionContent = (parts: string[], includeToolRules: boolean): string => {
+  const sections = includeToolRules ? [normalizeTrailingWhitespace(TOOL_RULES), ...parts] : parts;
+  if (sections.length === 0) {
+    return "";
+  }
+
+  return `${LINT_HEADER}\n${sections.join("\n\n")}\n`;
+};
+
+const buildScopeDiff = (
+  scope: OutputScope,
+  targetPaths: string[],
+  desiredContent: string,
+  rootDir: string
+): OutputGroupDiff | undefined => {
+  if (targetPaths.length === 0) {
+    return undefined;
+  }
+
+  const displayTargets = targetPaths.map((filePath) => toDisplayPath(rootDir, filePath));
+  const changedTargetPath = targetPaths.find((filePath) => {
+    if (!fs.existsSync(filePath)) {
+      return true;
+    }
+
+    return fs.readFileSync(filePath, "utf8") !== desiredContent;
+  });
+
+  if (!changedTargetPath) {
+    return {
+      scope,
+      targets: displayTargets,
+      status: "unchanged"
+    };
+  }
+
+  const before = fs.existsSync(changedTargetPath) ? fs.readFileSync(changedTargetPath, "utf8") : "";
+  const displayPath = toDisplayPath(rootDir, changedTargetPath);
+
+  return {
+    scope,
+    targets: displayTargets,
+    status: "updated",
+    patch: createTwoFilesPatch(
+      `a/${displayPath}`,
+      `b/${displayPath}`,
+      before,
+      desiredContent,
+      "",
+      "",
+      { context: 3 }
+    )
+  };
+};
+
 const composeRuleset = (
   rulesetPath: string,
   rootDir: string,
@@ -770,8 +872,11 @@ const composeRuleset = (
 ): ComposeResult => {
   const rulesetDir = path.dirname(rulesetPath);
   const projectRuleset = readProjectRuleset(rulesetPath);
-  const { primaryOutputPath, companionOutputPath } = resolveOutputPaths(rulesetDir, projectRuleset);
-  const composedOutputPath = normalizePath(path.relative(rootDir, primaryOutputPath));
+  const { primaryOutputPath, companionOutputPath, globalOutputPaths } = resolveOutputPaths(
+    rulesetDir,
+    projectRuleset
+  );
+  const composedOutputPath = toDisplayPath(rootDir, primaryOutputPath);
 
   const { rulesRoot, resolvedRef } = resolveRulesRoot(
     rulesetDir,
@@ -781,27 +886,29 @@ const composeRuleset = (
   const globalRoot = path.join(rulesRoot, "global");
   const domainsRoot = path.join(rulesRoot, "domains");
 
-  const resolvedRules: string[] = [];
-  const seenRules = new Set<string>();
+  const resolvedGlobalRules: string[] = [];
+  const seenGlobalRules = new Set<string>();
+  const resolvedRepositoryRules: string[] = [];
+  const seenRepositoryRules = new Set<string>();
 
   if (projectRuleset.global !== false) {
-    addRulePaths(collectMarkdownFiles(globalRoot), resolvedRules, seenRules);
+    addRulePaths(collectMarkdownFiles(globalRoot), resolvedGlobalRules, seenGlobalRules);
   }
 
   const domains = Array.isArray(projectRuleset.domains) ? projectRuleset.domains : [];
   for (const domain of domains) {
     const domainRoot = path.resolve(domainsRoot, domain);
-    addRulePaths(collectMarkdownFiles(domainRoot), resolvedRules, seenRules);
+    addRulePaths(collectMarkdownFiles(domainRoot), resolvedRepositoryRules, seenRepositoryRules);
   }
 
   const extraRules = Array.isArray(projectRuleset.extra) ? projectRuleset.extra : [];
   const directRulePaths = extraRules.map((rulePath) => resolveFrom(rulesetDir, rulePath));
-  addRulePaths(directRulePaths, resolvedRules, seenRules);
+  addRulePaths(directRulePaths, resolvedRepositoryRules, seenRepositoryRules);
 
   const totalBudget = projectRuleset.budget?.totalLines ?? DEFAULT_TOTAL_BUDGET;
   const moduleBudget = projectRuleset.budget?.moduleLines ?? DEFAULT_MODULE_BUDGET;
   const normalizedGlobalRoot = normalizePath(path.resolve(globalRoot));
-  const globalRuleFiles = resolvedRules.filter((p) =>
+  const globalRuleFiles = resolvedGlobalRules.filter((p) =>
     normalizePath(p).startsWith(`${normalizedGlobalRoot}/`)
   );
   const moduleLineCounts = globalRuleFiles.map((filePath) => {
@@ -818,57 +925,75 @@ const composeRuleset = (
     exceeded: totalLines > totalBudget || overBudgetModules.length > 0
   };
 
-  const parts = resolvedRules.map((rulePath) => {
-    const body = normalizeTrailingWhitespace(fs.readFileSync(rulePath, "utf8"));
-    const sourcePath = formatRuleSourcePath(
-      rulePath,
-      rulesRoot,
-      rulesetDir,
-      projectRuleset.source,
-      resolvedRef
-    );
-    return `Source: ${sourcePath}\n\n${body}`;
-  });
+  const buildRuleParts = (rulePaths: string[]): string[] =>
+    rulePaths.map((rulePath) => {
+      const body = normalizeTrailingWhitespace(fs.readFileSync(rulePath, "utf8"));
+      const sourcePath = formatRuleSourcePath(
+        rulePath,
+        rulesRoot,
+        rulesetDir,
+        projectRuleset.source,
+        resolvedRef
+      );
+      return `Source: ${sourcePath}\n\n${body}`;
+    });
 
-  const lintHeader = "<!-- markdownlint-disable MD025 -->";
-  const toolRules = normalizeTrailingWhitespace(TOOL_RULES);
-  const primaryOutputContent = `${lintHeader}\n${[toolRules, ...parts].join("\n\n")}\n`;
-  const composedFiles: Array<{ absolutePath: string; relativePath: string; content: string }> = [
+  const repositoryParts = buildRuleParts(resolvedRepositoryRules);
+  const globalParts = buildRuleParts(resolvedGlobalRules);
+  const primaryOutputContent = buildInstructionContent(repositoryParts, true);
+  const globalOutputContent = buildInstructionContent(globalParts, false);
+  const repositoryOutputs: string[] = [toDisplayPath(rootDir, primaryOutputPath)];
+  const globalOutputs = globalOutputPaths.map((filePath) => toDisplayPath(rootDir, filePath));
+  const composedFiles: Array<{
+    absolutePath: string;
+    relativePath: string;
+    content: string;
+    scope: OutputScope;
+  }> = [
     {
       absolutePath: primaryOutputPath,
-      relativePath: composedOutputPath,
-      content: primaryOutputContent
+      relativePath: toDisplayPath(rootDir, primaryOutputPath),
+      content: primaryOutputContent,
+      scope: "repository"
     }
   ];
 
   if (companionOutputPath) {
+    const companionDisplayPath = toDisplayPath(rootDir, companionOutputPath);
+    repositoryOutputs.push(companionDisplayPath);
     composedFiles.push({
       absolutePath: companionOutputPath,
-      relativePath: normalizePath(path.relative(rootDir, companionOutputPath)),
-      content: buildClaudeCompanionContent(primaryOutputPath, companionOutputPath)
+      relativePath: companionDisplayPath,
+      content: buildClaudeCompanionContent(primaryOutputPath, companionOutputPath),
+      scope: "repository"
     });
   }
 
-  let agentsMdDiff: AgentsMdOutputDiff | undefined;
-  if (options.emitAgentsMdDiff && path.basename(primaryOutputPath) === DEFAULT_OUTPUT) {
-    const before = fs.existsSync(primaryOutputPath)
-      ? fs.readFileSync(primaryOutputPath, "utf8")
-      : "";
-    if (before === primaryOutputContent) {
-      agentsMdDiff = { status: "unchanged" };
-    } else {
-      agentsMdDiff = {
-        status: "updated",
-        patch: createTwoFilesPatch(
-          `a/${composedOutputPath}`,
-          `b/${composedOutputPath}`,
-          before,
-          primaryOutputContent,
-          "",
-          "",
-          { context: 3 }
-        )
-      };
+  for (const globalOutputPath of globalOutputPaths) {
+    composedFiles.push({
+      absolutePath: globalOutputPath,
+      relativePath: toDisplayPath(rootDir, globalOutputPath),
+      content: globalOutputContent,
+      scope: "global"
+    });
+  }
+
+  const outputDiffs: OutputGroupDiff[] = [];
+  if (options.emitDiffs) {
+    const repositoryDiff = buildScopeDiff(
+      "repository",
+      [primaryOutputPath],
+      primaryOutputContent,
+      rootDir
+    );
+    if (repositoryDiff) {
+      repositoryDiff.targets = repositoryOutputs;
+      outputDiffs.push(repositoryDiff);
+    }
+
+    const globalDiff = buildScopeDiff("global", globalOutputPaths, globalOutputContent, rootDir);
+    if (globalDiff) {
+      outputDiffs.push(globalDiff);
     }
   }
 
@@ -881,33 +1006,49 @@ const composeRuleset = (
 
   return {
     output: composedOutputPath,
-    outputs: composedFiles.map((file) => file.relativePath),
-    agentsMdDiff,
+    outputs: [...repositoryOutputs, ...globalOutputs],
+    repositoryOutputs,
+    globalOutputs,
+    outputDiffs,
     budgetResult
   };
 };
 
-const printAgentsMdDiffIfPresent = (result: ComposeResult): void => {
-  if (!result.agentsMdDiff) {
-    return;
-  }
-
-  if (result.agentsMdDiff.status === "unchanged") {
-    process.stdout.write("AGENTS.md unchanged.\n");
-    return;
-  }
-
-  process.stdout.write(
-    "AGENTS.md updated. ACTION (agent): refresh rule recognition from the diff below.\n"
-  );
-  process.stdout.write("--- BEGIN DIFF ---\n");
-  if (result.agentsMdDiff.patch) {
-    process.stdout.write(result.agentsMdDiff.patch);
-    if (!result.agentsMdDiff.patch.endsWith("\n")) {
-      process.stdout.write("\n");
+const printOutputDiffs = (result: ComposeResult): void => {
+  for (const diff of result.outputDiffs) {
+    const scopeLabel = diff.scope === "global" ? "Global outputs" : "Repository outputs";
+    if (diff.status === "unchanged") {
+      process.stdout.write(`${scopeLabel} unchanged.\n`);
+      continue;
     }
+
+    process.stdout.write(
+      `${scopeLabel} updated. ACTION (agent): refresh rule recognition from the diff below.\n`
+    );
+    process.stdout.write(`Targets:\n${diff.targets.map((target) => `- ${target}`).join("\n")}\n`);
+    process.stdout.write(`--- BEGIN ${diff.scope.toUpperCase()} DIFF ---\n`);
+    if (diff.patch) {
+      process.stdout.write(diff.patch);
+      if (!diff.patch.endsWith("\n")) {
+        process.stdout.write("\n");
+      }
+    }
+    process.stdout.write(`--- END ${diff.scope.toUpperCase()} DIFF ---\n`);
   }
-  process.stdout.write("--- END DIFF ---\n");
+};
+
+const formatComposedOutputs = (result: ComposeResult): string => {
+  const lines = ["Composed instruction files:"];
+  if (result.repositoryOutputs.length > 0) {
+    lines.push("Repository:");
+    lines.push(...result.repositoryOutputs.map((filePath) => `- ${filePath}`));
+  }
+  if (result.globalOutputs.length > 0) {
+    lines.push("Global:");
+    lines.push(...result.globalOutputs.map((filePath) => `- ${filePath}`));
+  }
+
+  return `${lines.join("\n")}\n`;
 };
 
 const formatBudgetWarning = (result: BudgetCheckResult): string => {
@@ -978,7 +1119,7 @@ const formatInitRuleset = (ruleset: ProjectRuleset): string => {
   ];
 
   if (ruleset.global === false) {
-    lines.push("  // Include rules/global from the source.");
+    lines.push("  // Write shared global rules to user-level instruction files.");
     lines.push('  "global": false,');
   }
 
@@ -997,7 +1138,7 @@ const formatInitRuleset = (ruleset: ProjectRuleset): string => {
 const formatPlan = (items: InitPlanItem[], rootDir: string): string => {
   const lines = items.map((item) => {
     const verb = item.action === "overwrite" ? "Overwrite" : "Create";
-    const relative = normalizePath(path.relative(rootDir, item.path));
+    const relative = toDisplayPath(rootDir, item.path);
     return `- ${verb}: ${relative}`;
   });
 
@@ -1054,21 +1195,27 @@ const initProject = async (args: CliArgs, rootDir: string, rulesetName: string):
   }
 
   if (args.compose) {
-    const composedTargets = [outputPaths.primaryOutputPath];
+    const composedTargets = [
+      { path: outputPaths.primaryOutputPath, requireForce: true },
+      ...outputPaths.globalOutputPaths.map((outputPath) => ({
+        path: outputPath,
+        requireForce: false
+      }))
+    ];
     if (outputPaths.companionOutputPath) {
-      composedTargets.push(outputPaths.companionOutputPath);
+      composedTargets.push({ path: outputPaths.companionOutputPath, requireForce: true });
     }
 
     for (const composedTarget of composedTargets) {
-      if (fs.existsSync(composedTarget)) {
-        if (!args.force) {
+      if (fs.existsSync(composedTarget.path)) {
+        if (composedTarget.requireForce && !args.force) {
           throw new Error(
-            `Output already exists: ${normalizePath(composedTarget)} (use --force to overwrite)`
+            `Output already exists: ${normalizePath(composedTarget.path)} (use --force to overwrite)`
           );
         }
-        plan.push({ action: "overwrite", path: composedTarget });
+        plan.push({ action: "overwrite", path: composedTarget.path });
       } else {
-        plan.push({ action: "create", path: composedTarget });
+        plan.push({ action: "create", path: composedTarget.path });
       }
     }
   }
@@ -1085,7 +1232,7 @@ const initProject = async (args: CliArgs, rootDir: string, rulesetName: string):
             dryRun: true,
             plan: plan.map((item) => ({
               action: item.action,
-              path: normalizePath(path.relative(rootDir, item.path))
+              path: toDisplayPath(rootDir, item.path)
             }))
           },
           null,
@@ -1112,7 +1259,7 @@ const initProject = async (args: CliArgs, rootDir: string, rulesetName: string):
   if (args.compose) {
     composedOutput = composeRuleset(rulesetPath, rootDir, {
       refresh: args.refresh ?? false,
-      emitAgentsMdDiff: !args.quiet && !args.json
+      emitDiffs: !args.quiet && !args.json
     });
   }
 
@@ -1120,11 +1267,11 @@ const initProject = async (args: CliArgs, rootDir: string, rulesetName: string):
     process.stdout.write(
       JSON.stringify(
         {
-          initialized: [normalizePath(path.relative(rootDir, rulesetPath))],
-          localRules: extraToWrite.map((filePath) =>
-            normalizePath(path.relative(rootDir, filePath))
-          ),
+          initialized: [toDisplayPath(rootDir, rulesetPath)],
+          localRules: extraToWrite.map((filePath) => toDisplayPath(rootDir, filePath)),
           composed: composedOutput ? composedOutput.outputs : [],
+          repositoryOutputs: composedOutput ? composedOutput.repositoryOutputs : [],
+          globalOutputs: composedOutput ? composedOutput.globalOutputs : [],
           dryRun: false,
           ...(composedOutput ? { budget: composedOutput.budgetResult } : {})
         },
@@ -1133,21 +1280,17 @@ const initProject = async (args: CliArgs, rootDir: string, rulesetName: string):
       ) + "\n"
     );
   } else if (!args.quiet) {
-    process.stdout.write(
-      `Initialized ruleset:\n- ${normalizePath(path.relative(rootDir, rulesetPath))}\n`
-    );
+    process.stdout.write(`Initialized ruleset:\n- ${toDisplayPath(rootDir, rulesetPath)}\n`);
     if (extraToWrite.length > 0) {
       process.stdout.write(
         `Initialized local rules:\n${extraToWrite
-          .map((filePath) => `- ${normalizePath(path.relative(rootDir, filePath))}`)
+          .map((filePath) => `- ${toDisplayPath(rootDir, filePath)}`)
           .join("\n")}\n`
       );
     }
     if (composedOutput) {
-      process.stdout.write(
-        `Composed AGENTS.md:\n${composedOutput.outputs.map((filePath) => `- ${filePath}`).join("\n")}\n`
-      );
-      printAgentsMdDiffIfPresent(composedOutput);
+      process.stdout.write(formatComposedOutputs(composedOutput));
+      printOutputDiffs(composedOutput);
       if (composedOutput.budgetResult.exceeded) {
         process.stderr.write(formatBudgetWarning(composedOutput.budgetResult));
       }
@@ -1243,7 +1386,7 @@ const main = async (): Promise<void> => {
         "Next steps:",
         `- Edit rule files under: ${rulesDirectory}`,
         "- If this source is GitHub, commit and push the workspace changes before apply-rules.",
-        "- Run compose-agentsmd apply-rules from your project root to apply updates and regenerate AGENTS.md."
+        "- Run compose-agentsmd apply-rules from your project root to apply updates and regenerate instruction files."
       ].join("\n") + "\n"
     );
     return;
@@ -1263,21 +1406,25 @@ const main = async (): Promise<void> => {
     const output = composeRuleset(rulesetPath, rootDir, {
       refresh: true,
       dryRun: args.dryRun,
-      emitAgentsMdDiff: !args.quiet && !args.json
+      emitDiffs: !args.quiet && !args.json
     });
     if (args.json) {
       process.stdout.write(
         JSON.stringify(
-          { composed: output.outputs, dryRun: !!args.dryRun, budget: output.budgetResult },
+          {
+            composed: output.outputs,
+            repositoryOutputs: output.repositoryOutputs,
+            globalOutputs: output.globalOutputs,
+            dryRun: !!args.dryRun,
+            budget: output.budgetResult
+          },
           null,
           2
         ) + "\n"
       );
     } else if (!args.quiet) {
-      process.stdout.write(
-        `Composed AGENTS.md:\n${output.outputs.map((filePath) => `- ${filePath}`).join("\n")}\n`
-      );
-      printAgentsMdDiffIfPresent(output);
+      process.stdout.write(formatComposedOutputs(output));
+      printOutputDiffs(output);
       if (output.budgetResult.exceeded) {
         process.stderr.write(formatBudgetWarning(output.budgetResult));
       }
@@ -1294,7 +1441,7 @@ const main = async (): Promise<void> => {
     composeRuleset(rulesetPath, rootDir, {
       refresh: args.refresh,
       dryRun: args.dryRun,
-      emitAgentsMdDiff: !args.quiet && !args.json
+      emitDiffs: !args.quiet && !args.json
     })
   );
 
@@ -1303,6 +1450,8 @@ const main = async (): Promise<void> => {
       JSON.stringify(
         {
           composed: outputs.flatMap((result) => result.outputs),
+          repositoryOutputs: outputs.flatMap((result) => result.repositoryOutputs),
+          globalOutputs: outputs.flatMap((result) => result.globalOutputs),
           dryRun: !!args.dryRun,
           budget: outputs[0].budgetResult
         },
@@ -1312,13 +1461,17 @@ const main = async (): Promise<void> => {
     );
   } else if (!args.quiet) {
     process.stdout.write(
-      `Composed AGENTS.md:\n${outputs
-        .flatMap((result) => result.outputs)
-        .map((filePath) => `- ${filePath}`)
-        .join("\n")}\n`
+      formatComposedOutputs({
+        output: outputs[0].output,
+        outputs: outputs.flatMap((result) => result.outputs),
+        repositoryOutputs: outputs.flatMap((result) => result.repositoryOutputs),
+        globalOutputs: outputs.flatMap((result) => result.globalOutputs),
+        outputDiffs: [],
+        budgetResult: outputs[0].budgetResult
+      })
     );
     for (const result of outputs) {
-      printAgentsMdDiffIfPresent(result);
+      printOutputDiffs(result);
     }
     for (const result of outputs) {
       if (result.budgetResult.exceeded) {

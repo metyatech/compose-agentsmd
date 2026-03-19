@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## 4.0.0 - 2026-03-19
+
+- Breaking change: compose now writes shared `rules/global` content to user-global instruction files for Codex, Claude, Gemini CLI, and Copilot instead of embedding those rules into every repository `AGENTS.md`.
+- Repository output now contains only repository-facing instructions (`domains` + `extra`) plus tool rules, while `CLAUDE.md` continues to import the repository `AGENTS.md`.
+- Diff output now reports both repository-side and global-side changes.
+- Updated the CLI JSON output, schema text, README, and usage help to match the split-output behavior.
+- Bumped the package description to reflect repository-local and user-global composition.
+- Remediated a high-severity development dependency advisory via `npm audit fix`.
+
 ## 3.5.1 - 2026-02-25
 
 - Regenerated `AGENTS.md` with the latest shared global rule updates.

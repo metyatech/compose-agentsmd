@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Compose AGENTS.md ruleset",
+  "title": "Compose agent instruction files ruleset",
   "type": "object",
   "additionalProperties": false,
   "required": ["source"],
@@ -10,7 +10,8 @@
       "minLength": 1
     },
     "global": {
-      "type": "boolean"
+      "type": "boolean",
+      "description": "Write rules/global to user-global instruction files."
     },
     "output": {
       "type": "string",
