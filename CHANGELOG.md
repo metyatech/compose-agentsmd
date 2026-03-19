@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file.
 - Diff output now reports both repository-side and global-side changes.
 - Updated the CLI JSON output, schema text, README, and usage help to match the split-output behavior.
 - Bumped the package description to reflect repository-local and user-global composition.
+- Updated this repository's pre-commit hook to run `npm run compose` so it uses the checked-out implementation when regenerating instruction files.
 - Remediated a high-severity development dependency advisory via `npm audit fix`.
 
 ## 3.5.1 - 2026-02-25
