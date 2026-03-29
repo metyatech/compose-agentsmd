@@ -7,6 +7,7 @@ import { execFileSync } from "node:child_process";
 import readline from "node:readline";
 import { Ajv, type ErrorObject } from "ajv";
 import { createTwoFilesPatch } from "diff";
+import { prepareGitFallbackDestination } from "./git-fallback.js";
 
 const DEFAULT_RULESET_NAME = "agent-ruleset.json";
 const DEFAULT_OUTPUT = "AGENTS.md";
@@ -621,7 +622,7 @@ const cloneAtRef = (repoUrl: string, ref: string, destination: string): void => 
 };
 
 const fetchCommit = (repoUrl: string, commitHash: string, destination: string): void => {
-  ensureDir(destination);
+  prepareGitFallbackDestination(destination);
   execGit(["init"], destination);
   execGit(["remote", "add", "origin", repoUrl], destination);
   execGit(["fetch", "--depth", "1", "origin", commitHash], destination);

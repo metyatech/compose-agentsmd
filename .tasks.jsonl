@@ -1,1 +1,2 @@
 {"id":"elUyhTOW","description":"compose-agentsmd: split global and repo instruction outputs, then release/publish","stage":"committed","createdAt":"2026-03-19T10:06:39.594Z","updatedAt":"2026-03-19T10:10:43.312Z","committedEventId":"IKyod6OZDjnJrf8M"}
+{"id":"xJaNPgIx","description":"Fix compose-agentsmd apply-rules failure when origin remote already exists","stage":"committed","createdAt":"2026-03-29T13:08:30.548Z","updatedAt":"2026-03-29T13:13:26.458Z","committedEventId":"4SD8jJPfMeKLuF_w"}
