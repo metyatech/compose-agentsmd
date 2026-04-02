@@ -1,6 +1,6 @@
 {
   "name": "compose-agentsmd",
-  "version": "4.0.0",
+  "version": "5.0.0",
   "description": "CLI tools for composing repository-local and user-global agent instruction files from modular rule sets",
   "license": "MIT",
   "repository": {

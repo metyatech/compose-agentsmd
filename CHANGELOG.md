@@ -2,10 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 5.0.0 - 2026-04-02
 
-- Switched global-rule budget checks and warnings from line counts to `o200k_base` token counts.
-- Updated the ruleset schema, JSON output, README, and tests to use `budget.totalTokens` / `budget.moduleTokens`.
+- Breaking change: switched global-rule budget checks, schema fields, warnings,
+  and JSON output from line counts to `o200k_base` token counts
+  (`budget.totalTokens` / `budget.moduleTokens`).
+- Updated README and tests to match the token-based budget model and new
+  default thresholds.
+- Hardened `apply-rules` fallback handling for partial clone failures.
+- Remediated the remaining npm development dependency advisories via
+  `npm audit fix`.
 
 ## 4.0.0 - 2026-03-19
 
