@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { countTokens } from "gpt-tokenizer";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -99,6 +100,9 @@ const DEFAULT_GLOBAL_OUTPUTS = [
 ];
 const DEFAULT_REPOSITORY_OUTPUTS = ["AGENTS.md", "CLAUDE.md"];
 const DEFAULT_COMPOSED_OUTPUTS = [...DEFAULT_REPOSITORY_OUTPUTS, ...DEFAULT_GLOBAL_OUTPUTS];
+const BUDGET_TOKENIZER = "o200k_base";
+const DEFAULT_TOTAL_BUDGET = 4500;
+const DEFAULT_MODULE_BUDGET = 400;
 
 const createCliEnv = (home, extra = {}) => ({
   ...extra,
@@ -136,8 +140,9 @@ const runCliResult = (args, options) => {
 };
 
 const DEFAULT_BUDGET_OK = {
-  totalBudget: 350,
-  moduleBudget: 30,
+  tokenizer: BUDGET_TOKENIZER,
+  totalBudget: DEFAULT_TOTAL_BUDGET,
+  moduleBudget: DEFAULT_MODULE_BUDGET,
   overBudgetModules: [],
   exceeded: false
 };
@@ -152,6 +157,13 @@ const withToolRules = (body) =>
     ? `<!-- markdownlint-disable MD025 -->\n${TOOL_RULES}\n\n${body}`
     : `<!-- markdownlint-disable MD025 -->\n${TOOL_RULES}\n`;
 const withComposedHeader = (body) => (body ? `<!-- markdownlint-disable MD025 -->\n${body}` : "");
+const countBudgetTokens = (content) => (content.length === 0 ? 0 : countTokens(content));
+const buildGlobalOutput = (blocks) => withComposedHeader(blocks.join("\n\n") + "\n");
+const buildExpectedBudget = (blocks, overrides = {}) => ({
+  ...DEFAULT_BUDGET_OK,
+  totalTokens: countBudgetTokens(blocks.length === 0 ? "" : buildGlobalOutput(blocks)),
+  ...overrides
+});
 
 it("prints version with --version and -V", () => {
   const expected = `${packageJson.version}\n`;
@@ -384,12 +396,17 @@ it("does not duplicate output when output is CLAUDE.md", () => {
 
     const stdout = runCli(["--json", "--root", projectRoot], { cwd: repoRoot, env: cliEnv });
     const result = JSON.parse(stdout);
+    const onlyRule = formatRuleBlock(
+      path.join(rulesRoot, "global", "only.md"),
+      "# Only\n1",
+      projectRoot
+    );
     expect(result).toEqual({
       composed: ["CLAUDE.md", ...DEFAULT_GLOBAL_OUTPUTS],
       repositoryOutputs: ["CLAUDE.md"],
       globalOutputs: DEFAULT_GLOBAL_OUTPUTS,
       dryRun: false,
-      budget: { ...DEFAULT_BUDGET_OK, totalLines: 2 }
+      budget: buildExpectedBudget([onlyRule])
     });
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -733,12 +750,17 @@ it("apply-rules supports --json output", () => {
       env: cliEnv
     });
     const result = JSON.parse(stdout);
+    const onlyRule = formatRuleBlock(
+      path.join(rulesRoot, "global", "only.md"),
+      "# Only\n1",
+      projectRoot
+    );
     expect(result).toEqual({
       composed: DEFAULT_COMPOSED_OUTPUTS,
       repositoryOutputs: DEFAULT_REPOSITORY_OUTPUTS,
       globalOutputs: DEFAULT_GLOBAL_OUTPUTS,
       dryRun: false,
-      budget: { ...DEFAULT_BUDGET_OK, totalLines: 2 }
+      budget: buildExpectedBudget([onlyRule])
     });
 
     const output = fs.readFileSync(path.join(projectRoot, "AGENTS.md"), "utf8");
@@ -779,12 +801,17 @@ it("apply-rules respects --dry-run with --json", () => {
     expect(stdout).not.toMatch(/Composed instruction files:/u);
 
     const result = JSON.parse(stdout);
+    const onlyRule = formatRuleBlock(
+      path.join(rulesRoot, "global", "only.md"),
+      "# Only\n1",
+      projectRoot
+    );
     expect(result).toEqual({
       composed: DEFAULT_COMPOSED_OUTPUTS,
       repositoryOutputs: DEFAULT_REPOSITORY_OUTPUTS,
       globalOutputs: DEFAULT_GLOBAL_OUTPUTS,
       dryRun: true,
-      budget: { ...DEFAULT_BUDGET_OK, totalLines: 2 }
+      budget: buildExpectedBudget([onlyRule])
     });
     expect(fs.existsSync(path.join(projectRoot, "AGENTS.md"))).toBe(false);
     expect(fs.existsSync(path.join(projectRoot, "CLAUDE.md"))).toBe(false);
@@ -868,12 +895,17 @@ it("supports --json for machine-readable output", () => {
 
     const stdout = runCli(["--json", "--root", projectRoot], { cwd: repoRoot, env: cliEnv });
     const result = JSON.parse(stdout);
+    const onlyRule = formatRuleBlock(
+      path.join(rulesRoot, "global", "only.md"),
+      "# Only\n1",
+      projectRoot
+    );
     expect(result).toEqual({
       composed: DEFAULT_COMPOSED_OUTPUTS,
       repositoryOutputs: DEFAULT_REPOSITORY_OUTPUTS,
       globalOutputs: DEFAULT_GLOBAL_OUTPUTS,
       dryRun: false,
-      budget: { ...DEFAULT_BUDGET_OK, totalLines: 2 }
+      budget: buildExpectedBudget([onlyRule])
     });
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -1119,58 +1151,81 @@ it("budget: no warning when within limits", () => {
   }
 });
 
-it("budget: warns to stderr when a module exceeds per-module limit", () => {
+it("budget: warns to stderr when a module exceeds per-module token limit", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
 
   try {
     const projectRoot = path.join(tempRoot, "project");
     const sourceRoot = path.join(tempRoot, "rules-source");
     const rulesRoot = path.join(sourceRoot, "rules");
-
-    writeFile(
-      path.join(projectRoot, "agent-ruleset.json"),
-      JSON.stringify({ source: path.relative(projectRoot, sourceRoot) }, null, 2)
+    const bigContent = Array.from({ length: 200 }, () => "budget").join(" ");
+    const moduleSection = formatRuleBlock(
+      path.join(rulesRoot, "global", "big-module.md"),
+      bigContent,
+      projectRoot
     );
-    // 31 lines (exceeds default moduleLines=30)
-    const bigContent = Array.from({ length: 31 }, (_, i) => `line${i + 1}`).join("\n");
-    writeFile(path.join(rulesRoot, "global", "big-module.md"), bigContent);
+    const moduleTokens = countBudgetTokens(moduleSection);
+    const moduleBudget = moduleTokens - 1;
 
-    const { stderr } = runCliResult(["--root", projectRoot], { cwd: repoRoot });
-    expect(stderr).toMatch(/⚠ Global rules budget exceeded/u);
-    expect(stderr).toMatch(/Over-budget modules \(>30 lines\):/u);
-    expect(stderr).toMatch(/big-module\.md: 31 lines/u);
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
-
-it("budget: warns to stderr when total lines exceed total limit", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
-
-  try {
-    const projectRoot = path.join(tempRoot, "project");
-    const sourceRoot = path.join(tempRoot, "rules-source");
-    const rulesRoot = path.join(sourceRoot, "rules");
-
-    // Override budget so total limit is low (5 lines)
     writeFile(
       path.join(projectRoot, "agent-ruleset.json"),
       JSON.stringify(
         {
           source: path.relative(projectRoot, sourceRoot),
-          budget: { totalLines: 5, moduleLines: 30 }
+          budget: { totalTokens: moduleTokens + 500, moduleTokens: moduleBudget }
         },
         null,
         2
       )
     );
-    // 3 files each with 3 lines = 9 total > 5 budget
+    writeFile(path.join(rulesRoot, "global", "big-module.md"), bigContent);
+
+    const { stderr } = runCliResult(["--root", projectRoot], { cwd: repoRoot });
+    expect(stderr).toMatch(/⚠ Global rules budget exceeded/u);
+    expect(stderr).toMatch(new RegExp(`Over-budget modules \\(> ${moduleBudget} tokens\\):`, "u"));
+    expect(stderr).toMatch(new RegExp(`big-module\\.md: ${moduleTokens} tokens`, "u"));
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+it("budget: warns to stderr when total tokens exceed total limit", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
+
+  try {
+    const projectRoot = path.join(tempRoot, "project");
+    const sourceRoot = path.join(tempRoot, "rules-source");
+    const rulesRoot = path.join(sourceRoot, "rules");
+    const globalBlocks = [
+      formatRuleBlock(path.join(rulesRoot, "global", "a.md"), "# A\nline1\nline2", projectRoot),
+      formatRuleBlock(path.join(rulesRoot, "global", "b.md"), "# B\nline1\nline2", projectRoot),
+      formatRuleBlock(path.join(rulesRoot, "global", "c.md"), "# C\nline1\nline2", projectRoot)
+    ];
+    const totalTokens = countBudgetTokens(buildGlobalOutput(globalBlocks));
+    const totalBudget = totalTokens - 1;
+
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify(
+        {
+          source: path.relative(projectRoot, sourceRoot),
+          budget: { totalTokens: totalBudget, moduleTokens: DEFAULT_MODULE_BUDGET * 4 }
+        },
+        null,
+        2
+      )
+    );
     writeFile(path.join(rulesRoot, "global", "a.md"), "# A\nline1\nline2");
     writeFile(path.join(rulesRoot, "global", "b.md"), "# B\nline1\nline2");
     writeFile(path.join(rulesRoot, "global", "c.md"), "# C\nline1\nline2");
 
     const { stderr } = runCliResult(["--root", projectRoot], { cwd: repoRoot });
-    expect(stderr).toMatch(/⚠ Global rules budget exceeded: \d+\/5 lines/u);
+    expect(stderr).toMatch(
+      new RegExp(
+        `⚠ Global rules budget exceeded \\(${BUDGET_TOKENIZER}\\): ${totalTokens}/${totalBudget} tokens`,
+        "u"
+      )
+    );
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
@@ -1183,12 +1238,25 @@ it("budget: warning is suppressed with --quiet", () => {
     const projectRoot = path.join(tempRoot, "project");
     const sourceRoot = path.join(tempRoot, "rules-source");
     const rulesRoot = path.join(sourceRoot, "rules");
+    const bigContent = Array.from({ length: 200 }, () => "budget").join(" ");
+    const moduleSection = formatRuleBlock(
+      path.join(rulesRoot, "global", "big-module.md"),
+      bigContent,
+      projectRoot
+    );
+    const moduleTokens = countBudgetTokens(moduleSection);
 
     writeFile(
       path.join(projectRoot, "agent-ruleset.json"),
-      JSON.stringify({ source: path.relative(projectRoot, sourceRoot) }, null, 2)
+      JSON.stringify(
+        {
+          source: path.relative(projectRoot, sourceRoot),
+          budget: { totalTokens: moduleTokens + 500, moduleTokens: moduleTokens - 1 }
+        },
+        null,
+        2
+      )
     );
-    const bigContent = Array.from({ length: 31 }, (_, i) => `line${i + 1}`).join("\n");
     writeFile(path.join(rulesRoot, "global", "big-module.md"), bigContent);
 
     const { stderr } = runCliResult(["--quiet", "--root", projectRoot], { cwd: repoRoot });
@@ -1205,24 +1273,33 @@ it("budget: json output includes budget data when exceeded", () => {
     const projectRoot = path.join(tempRoot, "project");
     const sourceRoot = path.join(tempRoot, "rules-source");
     const rulesRoot = path.join(sourceRoot, "rules");
+    const overRule = formatRuleBlock(
+      path.join(rulesRoot, "global", "over.md"),
+      "# Over\nA\nB\nC",
+      projectRoot
+    );
+    const moduleTokens = countBudgetTokens(overRule);
 
     writeFile(
       path.join(projectRoot, "agent-ruleset.json"),
       JSON.stringify(
-        { source: path.relative(projectRoot, sourceRoot), budget: { moduleLines: 3 } },
+        {
+          source: path.relative(projectRoot, sourceRoot),
+          budget: { totalTokens: moduleTokens + 500, moduleTokens: moduleTokens - 1 }
+        },
         null,
         2
       )
     );
-    // 4 lines > moduleLines=3
     writeFile(path.join(rulesRoot, "global", "over.md"), "# Over\nA\nB\nC");
 
     const stdout = runCli(["--json", "--root", projectRoot], { cwd: repoRoot });
     const result = JSON.parse(stdout);
     expect(result.budget.exceeded).toBe(true);
+    expect(result.budget.tokenizer).toBe(BUDGET_TOKENIZER);
     expect(result.budget.overBudgetModules).toHaveLength(1);
     expect(result.budget.overBudgetModules[0].name).toBe("over.md");
-    expect(result.budget.overBudgetModules[0].lines).toBe(4);
+    expect(result.budget.overBudgetModules[0].tokens).toBe(moduleTokens);
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
@@ -1235,21 +1312,29 @@ it("budget: apply-rules warning emitted to stderr on exceeded", () => {
     const projectRoot = path.join(tempRoot, "project");
     const sourceRoot = path.join(tempRoot, "rules-source");
     const rulesRoot = path.join(sourceRoot, "rules");
+    const ruleSection = formatRuleBlock(
+      path.join(rulesRoot, "global", "rule.md"),
+      "# Rule\nA\nB",
+      projectRoot
+    );
+    const moduleTokens = countBudgetTokens(ruleSection);
 
     writeFile(
       path.join(projectRoot, "agent-ruleset.json"),
       JSON.stringify(
-        { source: path.relative(projectRoot, sourceRoot), budget: { moduleLines: 2 } },
+        {
+          source: path.relative(projectRoot, sourceRoot),
+          budget: { totalTokens: moduleTokens + 500, moduleTokens: moduleTokens - 1 }
+        },
         null,
         2
       )
     );
-    // 3 lines > moduleLines=2
     writeFile(path.join(rulesRoot, "global", "rule.md"), "# Rule\nA\nB");
 
     const { stderr } = runCliResult(["apply-rules", "--root", projectRoot], { cwd: repoRoot });
     expect(stderr).toMatch(/⚠ Global rules budget exceeded/u);
-    expect(stderr).toMatch(/rule\.md: 3 lines/u);
+    expect(stderr).toMatch(new RegExp(`rule\\.md: ${moduleTokens} tokens`, "u"));
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }

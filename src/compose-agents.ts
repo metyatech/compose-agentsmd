@@ -7,6 +7,7 @@ import { execFileSync } from "node:child_process";
 import readline from "node:readline";
 import { Ajv, type ErrorObject } from "ajv";
 import { createTwoFilesPatch } from "diff";
+import { countTokens } from "gpt-tokenizer";
 import { prepareGitFallbackDestination } from "./git-fallback.js";
 
 const DEFAULT_RULESET_NAME = "agent-ruleset.json";
@@ -54,8 +55,9 @@ type CliArgs = {
 const TOOL_RULES_PATH = new URL("../tools/tool-rules.md", import.meta.url);
 const USAGE_PATH = new URL("../tools/usage.txt", import.meta.url);
 
-const DEFAULT_TOTAL_BUDGET = 350;
-const DEFAULT_MODULE_BUDGET = 30;
+const BUDGET_TOKENIZER = "o200k_base";
+const DEFAULT_TOTAL_BUDGET = 4500;
+const DEFAULT_MODULE_BUDGET = 400;
 const LINT_HEADER = "<!-- markdownlint-disable MD025 -->";
 
 const readValueArg = (remaining: string[], index: number, flag: string): string => {
@@ -392,8 +394,8 @@ type ProjectRuleset = {
     output?: string;
   };
   budget?: {
-    totalLines?: number;
-    moduleLines?: number;
+    totalTokens?: number;
+    moduleTokens?: number;
   };
 };
 
@@ -499,10 +501,11 @@ type OutputGroupDiff = {
 };
 
 type BudgetCheckResult = {
-  totalLines: number;
+  tokenizer: string;
+  totalTokens: number;
   totalBudget: number;
   moduleBudget: number;
-  overBudgetModules: Array<{ name: string; lines: number }>;
+  overBudgetModules: Array<{ name: string; tokens: number }>;
   exceeded: boolean;
 };
 
@@ -820,6 +823,14 @@ const buildInstructionContent = (parts: string[], includeToolRules: boolean): st
   return `${LINT_HEADER}\n${sections.join("\n\n")}\n`;
 };
 
+const countBudgetTokens = (content: string): number => {
+  if (content.length === 0) {
+    return 0;
+  }
+
+  return countTokens(content);
+};
+
 const buildScopeDiff = (
   scope: OutputScope,
   targetPaths: string[],
@@ -906,27 +917,10 @@ const composeRuleset = (
   const directRulePaths = extraRules.map((rulePath) => resolveFrom(rulesetDir, rulePath));
   addRulePaths(directRulePaths, resolvedRepositoryRules, seenRepositoryRules);
 
-  const totalBudget = projectRuleset.budget?.totalLines ?? DEFAULT_TOTAL_BUDGET;
-  const moduleBudget = projectRuleset.budget?.moduleLines ?? DEFAULT_MODULE_BUDGET;
-  const normalizedGlobalRoot = normalizePath(path.resolve(globalRoot));
-  const globalRuleFiles = resolvedGlobalRules.filter((p) =>
-    normalizePath(p).startsWith(`${normalizedGlobalRoot}/`)
-  );
-  const moduleLineCounts = globalRuleFiles.map((filePath) => {
-    const content = fs.readFileSync(filePath, "utf8");
-    return { name: path.basename(filePath), lines: content.split("\n").length };
-  });
-  const totalLines = moduleLineCounts.reduce((sum, m) => sum + m.lines, 0);
-  const overBudgetModules = moduleLineCounts.filter((m) => m.lines > moduleBudget);
-  const budgetResult: BudgetCheckResult = {
-    totalLines,
-    totalBudget,
-    moduleBudget,
-    overBudgetModules,
-    exceeded: totalLines > totalBudget || overBudgetModules.length > 0
-  };
+  const totalBudget = projectRuleset.budget?.totalTokens ?? DEFAULT_TOTAL_BUDGET;
+  const moduleBudget = projectRuleset.budget?.moduleTokens ?? DEFAULT_MODULE_BUDGET;
 
-  const buildRuleParts = (rulePaths: string[]): string[] =>
+  const buildRuleParts = (rulePaths: string[]): Array<{ name: string; content: string }> =>
     rulePaths.map((rulePath) => {
       const body = normalizeTrailingWhitespace(fs.readFileSync(rulePath, "utf8"));
       const sourcePath = formatRuleSourcePath(
@@ -936,13 +930,32 @@ const composeRuleset = (
         projectRuleset.source,
         resolvedRef
       );
-      return `Source: ${sourcePath}\n\n${body}`;
+      return {
+        name: path.basename(rulePath),
+        content: `Source: ${sourcePath}\n\n${body}`
+      };
     });
 
   const repositoryParts = buildRuleParts(resolvedRepositoryRules);
   const globalParts = buildRuleParts(resolvedGlobalRules);
-  const primaryOutputContent = buildInstructionContent(repositoryParts, true);
-  const globalOutputContent = buildInstructionContent(globalParts, false);
+  const repositoryContentParts = repositoryParts.map((part) => part.content);
+  const globalContentParts = globalParts.map((part) => part.content);
+  const primaryOutputContent = buildInstructionContent(repositoryContentParts, true);
+  const globalOutputContent = buildInstructionContent(globalContentParts, false);
+  const moduleTokenCounts = globalParts.map((part) => ({
+    name: part.name,
+    tokens: countBudgetTokens(part.content)
+  }));
+  const totalTokens = countBudgetTokens(globalOutputContent);
+  const overBudgetModules = moduleTokenCounts.filter((module) => module.tokens > moduleBudget);
+  const budgetResult: BudgetCheckResult = {
+    tokenizer: BUDGET_TOKENIZER,
+    totalTokens,
+    totalBudget,
+    moduleBudget,
+    overBudgetModules,
+    exceeded: totalTokens > totalBudget || overBudgetModules.length > 0
+  };
   const repositoryOutputs: string[] = [toDisplayPath(rootDir, primaryOutputPath)];
   const globalOutputs = globalOutputPaths.map((filePath) => toDisplayPath(rootDir, filePath));
   const composedFiles: Array<{
@@ -1054,14 +1067,14 @@ const formatComposedOutputs = (result: ComposeResult): string => {
 
 const formatBudgetWarning = (result: BudgetCheckResult): string => {
   const totalInfo =
-    result.totalLines > result.totalBudget
-      ? `: ${result.totalLines}/${result.totalBudget} lines`
+    result.totalTokens > result.totalBudget
+      ? `: ${result.totalTokens}/${result.totalBudget} tokens`
       : "";
-  const lines = [`⚠ Global rules budget exceeded${totalInfo}`];
+  const lines = [`⚠ Global rules budget exceeded (${result.tokenizer})${totalInfo}`];
   if (result.overBudgetModules.length > 0) {
-    lines.push(`  Over-budget modules (>${result.moduleBudget} lines):`);
+    lines.push(`  Over-budget modules (> ${result.moduleBudget} tokens):`);
     for (const mod of result.overBudgetModules) {
-      lines.push(`    ${mod.name}: ${mod.lines} lines`);
+      lines.push(`    ${mod.name}: ${mod.tokens} tokens`);
     }
   }
   return `${lines.join("\n")}\n`;

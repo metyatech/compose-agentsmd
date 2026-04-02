@@ -115,10 +115,15 @@ Ruleset keys:
 - `global` (optional): write `rules/global` to user-global instruction files (defaults to true). Set `false` to skip global writes.
 - `domains` (optional): domain folders under `rules/domains/<domain>`.
 - `extra` (optional): additional local rule files to append.
+- `budget` (optional): global-rule budget thresholds in `o200k_base` tokens.
+- `budget.totalTokens` (optional): total token budget for the composed global instruction output (defaults to `4500`).
+- `budget.moduleTokens` (optional): per-module token budget for each composed global rule section (defaults to `400`).
 - `claude` (optional): repository companion settings for Claude Code.
 - `claude.enabled` (optional): enable/disable companion generation (defaults to `true`).
 - `claude.output` (optional): companion file path (defaults to `CLAUDE.md`).
 - `output` (optional): repository output file name (defaults to `AGENTS.md`).
+
+When the composed global instruction output exceeds either budget, the CLI emits a warning to `stderr`. The machine-readable `--json` output includes the tokenizer name, total token count, and any over-budget modules.
 
 ### Ruleset schema validation
 

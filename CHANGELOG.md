@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+- Switched global-rule budget checks and warnings from line counts to `o200k_base` token counts.
+- Updated the ruleset schema, JSON output, README, and tests to use `budget.totalTokens` / `budget.moduleTokens`.
+
 ## 4.0.0 - 2026-03-19
 
 - Breaking change: compose now writes shared `rules/global` content to user-global instruction files for Codex, Claude, Gemini CLI, and Copilot instead of embedding those rules into every repository `AGENTS.md`.
