@@ -116,14 +116,14 @@ Ruleset keys:
 - `domains` (optional): domain folders under `rules/domains/<domain>`.
 - `extra` (optional): additional local rule files to append.
 - `budget` (optional): global-rule budget thresholds in `o200k_base` tokens.
-- `budget.totalTokens` (optional): total token budget for the composed global instruction output (defaults to `4500`).
-- `budget.moduleTokens` (optional): per-module token budget for each composed global rule section (defaults to `400`).
+- `budget.totalTokens` (optional): hard total token budget for the composed global instruction output (defaults to `8000`). Exceeding this is reported as a budget violation.
+- `budget.moduleTokens` (optional): per-module advisory threshold for each composed global rule section (defaults to `800`). Crossing this is **not** a violation; it triggers a review prompt to check whether the listed modules contain procedural content that should move to skills (procedures belong in skills, not rules).
 - `claude` (optional): repository companion settings for Claude Code.
 - `claude.enabled` (optional): enable/disable companion generation (defaults to `true`).
 - `claude.output` (optional): companion file path (defaults to `CLAUDE.md`).
 - `output` (optional): repository output file name (defaults to `AGENTS.md`).
 
-When the composed global instruction output exceeds either budget, the CLI emits a warning to `stderr`. The machine-readable `--json` output includes the tokenizer name, total token count, and any over-budget modules.
+When the composed global instruction output exceeds the total budget, the CLI emits a `⚠ Global rules budget exceeded` warning to `stderr`. When any module crosses the per-module advisory threshold, the CLI emits a separate `ℹ Modules over per-module review threshold` advisory to `stderr`. Both can be suppressed with `--quiet`. The machine-readable `--json` output includes `budget.totalExceeded`, `budget.moduleReviewTriggered`, the tokenizer name, total token count, and any over-threshold modules.
 
 ### Ruleset schema validation
 

@@ -56,8 +56,17 @@ const TOOL_RULES_PATH = new URL("../tools/tool-rules.md", import.meta.url);
 const USAGE_PATH = new URL("../tools/usage.txt", import.meta.url);
 
 const BUDGET_TOKENIZER = "o200k_base";
-const DEFAULT_TOTAL_BUDGET = 4500;
-const DEFAULT_MODULE_BUDGET = 400;
+// Token budgets for the composed global rules.
+// - DEFAULT_TOTAL_BUDGET: hard budget for the always-loaded global rules.
+//   Sized to accommodate realistic invariant density (~80–120 invariants ×
+//   ~30–50 tokens each ≈ 5–6k tokens) plus structural margin and growth
+//   headroom, while staying a small fraction of the smallest target model's
+//   effective system-prompt window. Total exceedance is a budget violation.
+// - DEFAULT_MODULE_BUDGET: per-module advisory threshold, NOT a violation.
+//   Crossing it triggers a review prompt to check whether the module is
+//   leaking procedural content (procedures belong in skills, not rules).
+const DEFAULT_TOTAL_BUDGET = 8000;
+const DEFAULT_MODULE_BUDGET = 800;
 const LINT_HEADER = "<!-- markdownlint-disable MD025 -->";
 
 const readValueArg = (remaining: string[], index: number, flag: string): string => {
@@ -506,7 +515,8 @@ type BudgetCheckResult = {
   totalBudget: number;
   moduleBudget: number;
   overBudgetModules: Array<{ name: string; tokens: number }>;
-  exceeded: boolean;
+  totalExceeded: boolean;
+  moduleReviewTriggered: boolean;
 };
 
 type ComposeResult = {
@@ -954,7 +964,8 @@ const composeRuleset = (
     totalBudget,
     moduleBudget,
     overBudgetModules,
-    exceeded: totalTokens > totalBudget || overBudgetModules.length > 0
+    totalExceeded: totalTokens > totalBudget,
+    moduleReviewTriggered: overBudgetModules.length > 0
   };
   const repositoryOutputs: string[] = [toDisplayPath(rootDir, primaryOutputPath)];
   const globalOutputs = globalOutputPaths.map((filePath) => toDisplayPath(rootDir, filePath));
@@ -1065,19 +1076,26 @@ const formatComposedOutputs = (result: ComposeResult): string => {
   return `${lines.join("\n")}\n`;
 };
 
-const formatBudgetWarning = (result: BudgetCheckResult): string => {
-  const totalInfo =
-    result.totalTokens > result.totalBudget
-      ? `: ${result.totalTokens}/${result.totalBudget} tokens`
-      : "";
-  const lines = [`⚠ Global rules budget exceeded (${result.tokenizer})${totalInfo}`];
-  if (result.overBudgetModules.length > 0) {
-    lines.push(`  Over-budget modules (> ${result.moduleBudget} tokens):`);
+const formatBudgetReport = (result: BudgetCheckResult): string => {
+  const lines: string[] = [];
+  if (result.totalExceeded) {
+    lines.push(
+      `⚠ Global rules budget exceeded (${result.tokenizer}): ` +
+        `${result.totalTokens}/${result.totalBudget} tokens`
+    );
+  }
+  if (result.moduleReviewTriggered) {
+    lines.push(
+      `ℹ Modules over per-module review threshold (> ${result.moduleBudget} tokens, advisory):`
+    );
     for (const mod of result.overBudgetModules) {
       lines.push(`    ${mod.name}: ${mod.tokens} tokens`);
     }
+    lines.push(
+      "  Review whether listed modules contain procedural content that should move to skills."
+    );
   }
-  return `${lines.join("\n")}\n`;
+  return lines.length === 0 ? "" : `${lines.join("\n")}\n`;
 };
 
 type InitPlanItem = {
@@ -1305,8 +1323,11 @@ const initProject = async (args: CliArgs, rootDir: string, rulesetName: string):
     if (composedOutput) {
       process.stdout.write(formatComposedOutputs(composedOutput));
       printOutputDiffs(composedOutput);
-      if (composedOutput.budgetResult.exceeded) {
-        process.stderr.write(formatBudgetWarning(composedOutput.budgetResult));
+      if (
+        composedOutput.budgetResult.totalExceeded ||
+        composedOutput.budgetResult.moduleReviewTriggered
+      ) {
+        process.stderr.write(formatBudgetReport(composedOutput.budgetResult));
       }
     }
   }
@@ -1439,8 +1460,8 @@ const main = async (): Promise<void> => {
     } else if (!args.quiet) {
       process.stdout.write(formatComposedOutputs(output));
       printOutputDiffs(output);
-      if (output.budgetResult.exceeded) {
-        process.stderr.write(formatBudgetWarning(output.budgetResult));
+      if (output.budgetResult.totalExceeded || output.budgetResult.moduleReviewTriggered) {
+        process.stderr.write(formatBudgetReport(output.budgetResult));
       }
     }
     return;
@@ -1488,8 +1509,8 @@ const main = async (): Promise<void> => {
       printOutputDiffs(result);
     }
     for (const result of outputs) {
-      if (result.budgetResult.exceeded) {
-        process.stderr.write(formatBudgetWarning(result.budgetResult));
+      if (result.budgetResult.totalExceeded || result.budgetResult.moduleReviewTriggered) {
+        process.stderr.write(formatBudgetReport(result.budgetResult));
       }
     }
   }

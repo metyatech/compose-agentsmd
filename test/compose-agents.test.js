@@ -101,8 +101,8 @@ const DEFAULT_GLOBAL_OUTPUTS = [
 const DEFAULT_REPOSITORY_OUTPUTS = ["AGENTS.md", "CLAUDE.md"];
 const DEFAULT_COMPOSED_OUTPUTS = [...DEFAULT_REPOSITORY_OUTPUTS, ...DEFAULT_GLOBAL_OUTPUTS];
 const BUDGET_TOKENIZER = "o200k_base";
-const DEFAULT_TOTAL_BUDGET = 4500;
-const DEFAULT_MODULE_BUDGET = 400;
+const DEFAULT_TOTAL_BUDGET = 8000;
+const DEFAULT_MODULE_BUDGET = 800;
 
 const createCliEnv = (home, extra = {}) => ({
   ...extra,
@@ -144,7 +144,8 @@ const DEFAULT_BUDGET_OK = {
   totalBudget: DEFAULT_TOTAL_BUDGET,
   moduleBudget: DEFAULT_MODULE_BUDGET,
   overBudgetModules: [],
-  exceeded: false
+  totalExceeded: false,
+  moduleReviewTriggered: false
 };
 
 const formatRuleBlock = (rulePath, body, projectRoot) => {
@@ -1151,7 +1152,7 @@ it("budget: no warning when within limits", () => {
   }
 });
 
-it("budget: warns to stderr when a module exceeds per-module token limit", () => {
+it("budget: emits per-module review advisory to stderr when a module exceeds advisory threshold", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
 
   try {
@@ -1181,9 +1182,15 @@ it("budget: warns to stderr when a module exceeds per-module token limit", () =>
     writeFile(path.join(rulesRoot, "global", "big-module.md"), bigContent);
 
     const { stderr } = runCliResult(["--root", projectRoot], { cwd: repoRoot });
-    expect(stderr).toMatch(/⚠ Global rules budget exceeded/u);
-    expect(stderr).toMatch(new RegExp(`Over-budget modules \\(> ${moduleBudget} tokens\\):`, "u"));
+    expect(stderr).not.toMatch(/⚠ Global rules budget exceeded/u);
+    expect(stderr).toMatch(
+      new RegExp(
+        `ℹ Modules over per-module review threshold \\(> ${moduleBudget} tokens, advisory\\):`,
+        "u"
+      )
+    );
     expect(stderr).toMatch(new RegExp(`big-module\\.md: ${moduleTokens} tokens`, "u"));
+    expect(stderr).toMatch(/Review whether listed modules contain procedural content/u);
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
@@ -1266,7 +1273,7 @@ it("budget: warning is suppressed with --quiet", () => {
   }
 });
 
-it("budget: json output includes budget data when exceeded", () => {
+it("budget: json output includes budget data when module advisory triggers", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
 
   try {
@@ -1295,7 +1302,8 @@ it("budget: json output includes budget data when exceeded", () => {
 
     const stdout = runCli(["--json", "--root", projectRoot], { cwd: repoRoot });
     const result = JSON.parse(stdout);
-    expect(result.budget.exceeded).toBe(true);
+    expect(result.budget.totalExceeded).toBe(false);
+    expect(result.budget.moduleReviewTriggered).toBe(true);
     expect(result.budget.tokenizer).toBe(BUDGET_TOKENIZER);
     expect(result.budget.overBudgetModules).toHaveLength(1);
     expect(result.budget.overBudgetModules[0].name).toBe("over.md");
@@ -1305,7 +1313,7 @@ it("budget: json output includes budget data when exceeded", () => {
   }
 });
 
-it("budget: apply-rules warning emitted to stderr on exceeded", () => {
+it("budget: apply-rules emits per-module review advisory on module advisory trigger", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
 
   try {
@@ -1333,7 +1341,8 @@ it("budget: apply-rules warning emitted to stderr on exceeded", () => {
     writeFile(path.join(rulesRoot, "global", "rule.md"), "# Rule\nA\nB");
 
     const { stderr } = runCliResult(["apply-rules", "--root", projectRoot], { cwd: repoRoot });
-    expect(stderr).toMatch(/⚠ Global rules budget exceeded/u);
+    expect(stderr).not.toMatch(/⚠ Global rules budget exceeded/u);
+    expect(stderr).toMatch(/ℹ Modules over per-module review threshold/u);
     expect(stderr).toMatch(new RegExp(`rule\\.md: ${moduleTokens} tokens`, "u"));
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });

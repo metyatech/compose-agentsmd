@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## 6.0.0 - 2026-04-09
+
+- Breaking change: split the global-rule budget into a hard total budget and an
+  advisory per-module review threshold. The total budget remains a violation
+  when exceeded; the per-module threshold is now an advisory that triggers a
+  review prompt rather than a violation.
+- Renamed `BudgetCheckResult.exceeded` to `totalExceeded` and added
+  `moduleReviewTriggered`. JSON output reflects the rename.
+- Renamed the internal helper `formatBudgetWarning` to `formatBudgetReport`,
+  which now emits `⚠ Global rules budget exceeded` only on total exceedance and
+  a separate `ℹ Modules over per-module review threshold` advisory on
+  per-module overage. Both can be suppressed with `--quiet`.
+- Raised default budgets to `DEFAULT_TOTAL_BUDGET = 8000` and
+  `DEFAULT_MODULE_BUDGET = 800`, sized to fit a realistic invariant density
+  (~80–120 invariants × ~30–50 tokens) plus structural and growth headroom
+  while staying a small fraction of the smallest target model's effective
+  system-prompt window. Documented derivation in source comments.
+- README and tests updated to reflect the new defaults, semantics, and report
+  format.
+
 ## 5.0.0 - 2026-04-02
 
 - Breaking change: switched global-rule budget checks, schema fields, warnings,
