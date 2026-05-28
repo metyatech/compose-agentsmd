@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## 6.0.3 - 2026-05-28
+
+- Fix GitHub Actions publish workflow to correctly pass the npm authentication token.
+
 ## 6.0.2 - 2026-05-28
 
 - Added GitHub Actions workflow for automated npm trusted publishing (OIDC / provenance).
