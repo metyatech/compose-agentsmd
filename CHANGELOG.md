@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## 6.0.2 - 2026-05-28
+
+- Added GitHub Actions workflow for automated npm trusted publishing (OIDC / provenance).
+- Updated documentation and changelog tracking for recent patch releases.
+
+## 6.0.1 - 2026-05-28
+
+- Security: updated `fast-uri` dependency to remediate a high-severity vulnerability.
+
 ## 6.0.0 - 2026-04-09
 
 - Breaking change: split the global-rule budget into a hard total budget and an
