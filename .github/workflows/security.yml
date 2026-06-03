@@ -10,6 +10,9 @@ on:
   schedule:
     - cron: "0 0 * * 1"
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   dependency-audit:
     runs-on: ubuntu-latest
