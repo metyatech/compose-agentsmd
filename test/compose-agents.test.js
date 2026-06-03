@@ -166,6 +166,13 @@ const buildExpectedBudget = (blocks, overrides = {}) => ({
   ...overrides
 });
 
+it("scopes the session gate to externally supplied instructions", () => {
+  expect(TOOL_RULES).toContain("externally supplied human/operator instruction");
+  expect(TOOL_RULES).toContain("run `compose-agentsmd` once");
+  expect(TOOL_RULES).toContain("generated continuations");
+  expect(TOOL_RULES).not.toContain("before responding to ANY user message");
+});
+
 it("prints version with --version and -V", () => {
   const expected = `${packageJson.version}\n`;
   const stdoutLong = runCli(["--version"], { cwd: repoRoot });
