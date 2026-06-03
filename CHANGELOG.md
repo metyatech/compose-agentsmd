@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## 6.0.5 - 2026-06-03
+
+- Clarified the session gate so `compose-agentsmd` runs once per externally
+  supplied human/operator instruction and is not rerun for generated
+  continuations, retries, or resumed execution.
+- Added regression coverage for the session gate wording.
+- Updated the lockfile with `npm audit fix` to remediate a critical Vitest
+  advisory.
+
+## 6.0.4 - 2026-05-28
+
+- Fixed the GitHub Actions npm trusted-publishing workflow configuration.
+
 ## 6.0.3 - 2026-05-28
 
 - Fix GitHub Actions publish workflow to correctly pass the npm authentication token.
