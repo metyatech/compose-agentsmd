@@ -1,4 +1,11 @@
-Usage: compose-agentsmd [edit-rules|apply-rules|init] [--root <path>] [--ruleset <path>] [--ruleset-name <name>] [--source <source>] [--domains <list>] [--extra <list>] [--output <file>] [--no-domains] [--no-extra] [--no-global] [--compose] [--dry-run] [--yes] [--force] [--refresh] [--clear-cache] [--version|-V] [--verbose|-v] [--quiet|-q] [--json] [--help|-h]
+Usage: compose-agentsmd [edit-rules|apply-rules|init|check] [--root <path>] [--ruleset <path>] [--ruleset-name <name>] [--profile <name>] [--output <file>] [--no-global] [--compose] [--dry-run] [--yes] [--force] [--refresh] [--clear-cache] [--version|-V] [--verbose|-v] [--quiet|-q] [--json] [--help|-h]
+
+Commands:
+  (default)            Compose instruction files from the ruleset
+  init                 Generate a new ruleset (sources + profile)
+  check                Verify generated repository outputs are current (exit 1 if stale)
+  edit-rules           Prepare or locate a writable rules workspace
+  apply-rules          Push workspace changes (GitHub sources) and regenerate rules with refresh
 
 Options:
   --help, -h           Show help and exit
@@ -9,15 +16,11 @@ Options:
   --root <path>        Project root directory (default: current working directory)
   --ruleset <path>     Only compose a single ruleset file
   --ruleset-name <name> Ruleset filename in the project root (default: agent-ruleset.json)
-  --source <source>    Rules source for init (default: github:owner/repo@latest)
-  --domains <list>     Comma-separated domains for init (default: none)
-  --extra <list>       Comma-separated extra rules for init
+  --profile <name>     Profile name for init (default: node-cli)
   --output <file>      Repository output filename for init (default: AGENTS.md)
-  --no-domains         Initialize with no domains
-  --no-extra           Initialize without extra rule files
   --no-global          Initialize without user-global rules
   --compose            Compose repository and user-global instruction files after init
-  --dry-run            Show init plan without writing files
+  --dry-run            Show plan without writing files
   --yes                Skip init confirmation prompt
   --force              Overwrite existing files during init
   --refresh            Refresh cached remote rules

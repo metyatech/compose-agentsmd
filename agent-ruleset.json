@@ -1,6 +1,5 @@
 {
-  "source": "github:metyatech/agent-rules",
-  "domains": ["node"],
-  "extra": ["agent-rules-local/compose-agentsmd-local.md"],
+  "sources": ["github:metyatech/agent-rules", "agent-rules-local"],
+  "profile": "compose-agentsmd",
   "output": "AGENTS.md"
 }

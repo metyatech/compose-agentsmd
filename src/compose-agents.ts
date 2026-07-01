@@ -9,6 +9,7 @@ import { Ajv, type ErrorObject } from "ajv";
 import { createTwoFilesPatch } from "diff";
 import { countTokens } from "gpt-tokenizer";
 import { prepareGitFallbackDestination } from "./git-fallback.js";
+import { resolveProfileSelections } from "./profiles.js";
 
 const DEFAULT_RULESET_NAME = "agent-ruleset.json";
 const DEFAULT_OUTPUT = "AGENTS.md";
@@ -23,9 +24,8 @@ const DEFAULT_COPILOT_GLOBAL_OUTPUT = path.join(
 );
 const DEFAULT_CACHE_ROOT = path.join(os.homedir(), ".agentsmd", "cache");
 const DEFAULT_WORKSPACE_ROOT = path.join(os.homedir(), ".agentsmd", "workspace");
-const DEFAULT_INIT_SOURCE = "github:owner/repo@latest";
-const DEFAULT_INIT_DOMAINS: string[] = [];
-const DEFAULT_INIT_EXTRA: string[] = [];
+const DEFAULT_INIT_SOURCES: string[] = ["github:owner/repo"];
+const DEFAULT_INIT_PROFILE = "node-cli";
 const RULESET_SCHEMA_PATH = new URL("../agent-ruleset.schema.json", import.meta.url);
 const PACKAGE_JSON_PATH = new URL("../package.json", import.meta.url);
 
@@ -40,16 +40,14 @@ type CliArgs = {
   rulesetName?: string;
   refresh?: boolean;
   clearCache?: boolean;
-  source?: string;
-  domains?: string[];
-  extra?: string[];
+  profile?: string;
   output?: string;
   global?: boolean;
   compose?: boolean;
   dryRun?: boolean;
   yes?: boolean;
   force?: boolean;
-  command?: "compose" | "edit-rules" | "apply-rules" | "init";
+  command?: "compose" | "edit-rules" | "apply-rules" | "init" | "check";
 };
 
 const TOOL_RULES_PATH = new URL("../tools/tool-rules.md", import.meta.url);
@@ -79,11 +77,11 @@ const readValueArg = (remaining: string[], index: number, flag: string): string 
 
 const parseArgs = (argv: string[]): CliArgs => {
   const args: CliArgs = {};
-  const knownCommands = new Set(["edit-rules", "apply-rules", "init"]);
+  const knownCommands = new Set(["edit-rules", "apply-rules", "init", "check"]);
   const remaining = [...argv];
 
   if (remaining.length > 0 && knownCommands.has(remaining[0])) {
-    args.command = remaining.shift() as "edit-rules" | "apply-rules" | "init";
+    args.command = remaining.shift() as "edit-rules" | "apply-rules" | "init" | "check";
   }
 
   for (let i = 0; i < remaining.length; i += 1) {
@@ -145,34 +143,10 @@ const parseArgs = (argv: string[]): CliArgs => {
       continue;
     }
 
-    if (arg === "--source") {
-      const value = readValueArg(remaining, i, "--source");
-      args.source = value;
+    if (arg === "--profile") {
+      const value = readValueArg(remaining, i, "--profile");
+      args.profile = value;
       i += 1;
-      continue;
-    }
-
-    if (arg === "--domains") {
-      const value = readValueArg(remaining, i, "--domains");
-      args.domains = [...(args.domains ?? []), ...value.split(",").map((entry) => entry.trim())];
-      i += 1;
-      continue;
-    }
-
-    if (arg === "--no-domains") {
-      args.domains = [];
-      continue;
-    }
-
-    if (arg === "--extra") {
-      const value = readValueArg(remaining, i, "--extra");
-      args.extra = [...(args.extra ?? []), ...value.split(",").map((entry) => entry.trim())];
-      i += 1;
-      continue;
-    }
-
-    if (arg === "--no-extra") {
-      args.extra = [];
       continue;
     }
 
@@ -218,18 +192,6 @@ const normalizeTrailingWhitespace = (content: string): string => content.replace
 const normalizePath = (filePath: string): string => filePath.replace(/\\/g, "/");
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === "string" && value.trim() !== "";
-const normalizeListOption = (values: string[] | undefined, label: string): string[] | undefined => {
-  if (!values) {
-    return undefined;
-  }
-
-  const trimmed = values.map((value) => value.trim());
-  if (trimmed.some((value) => value.length === 0)) {
-    throw new Error(`Invalid value for ${label}`);
-  }
-
-  return [...new Set(trimmed)];
-};
 
 const askQuestion = (prompt: string): Promise<string> =>
   new Promise((resolve) => {
@@ -317,6 +279,9 @@ const ensureDirectoryExists = (dirPath: string): void => {
   }
 };
 
+const isExistingDirectory = (dirPath: string): boolean =>
+  fs.existsSync(dirPath) && fs.statSync(dirPath).isDirectory();
+
 const stripJsonComments = (input: string): string => {
   let output = "";
   let inString = false;
@@ -393,10 +358,9 @@ const readJsonFile = (filePath: string): unknown => {
 };
 
 type ProjectRuleset = {
-  source: string;
+  sources: string[];
+  profile: string;
   global?: boolean;
-  domains?: string[];
-  extra?: string[];
   output?: string;
   claude?: {
     enabled?: boolean;
@@ -458,6 +422,13 @@ const collectMarkdownFiles = (rootDir: string): string[] => {
     const entries = fs.readdirSync(currentDir, { withFileTypes: true });
 
     for (const entry of entries) {
+      // Skip symbolic links (including Windows junctions). Following them would
+      // let a malicious source compose files outside its declared rules/domains
+      // boundary through the markdown collector.
+      if (entry.isSymbolicLink()) {
+        continue;
+      }
+
       const entryPath = path.join(currentDir, entry.name);
 
       if (entry.isDirectory()) {
@@ -478,26 +449,11 @@ const collectMarkdownFiles = (rootDir: string): string[] => {
   });
 };
 
-const addRulePaths = (
-  rulePaths: string[],
-  resolvedRules: string[],
-  seenRules: Set<string>
-): void => {
-  for (const rulePath of rulePaths) {
-    const resolvedRulePath = path.resolve(rulePath);
-    if (seenRules.has(resolvedRulePath)) {
-      continue;
-    }
-    ensureFileExists(resolvedRulePath);
-    resolvedRules.push(resolvedRulePath);
-    seenRules.add(resolvedRulePath);
-  }
-};
-
 type ComposeOptions = {
   refresh?: boolean;
   dryRun?: boolean;
   emitDiffs?: boolean;
+  emitGlobalDiffs?: boolean;
 };
 
 type OutputScope = "repository" | "global";
@@ -519,11 +475,18 @@ type BudgetCheckResult = {
   moduleReviewTriggered: boolean;
 };
 
+type RepositoryComposedFile = {
+  absolutePath: string;
+  displayPath: string;
+  content: string;
+};
+
 type ComposeResult = {
   output: string;
   outputs: string[];
   repositoryOutputs: string[];
   globalOutputs: string[];
+  repositoryFiles: RepositoryComposedFile[];
   outputDiffs: OutputGroupDiff[];
   budgetResult: BudgetCheckResult;
 };
@@ -728,7 +691,7 @@ const ensureWorkspaceForGithubSource = (source: string): string => {
   return workspaceRoot;
 };
 
-const applyRulesFromWorkspace = (rulesetDir: string, source: string): void => {
+const applyRulesFromWorkspace = (source: string): void => {
   if (!source.startsWith("github:")) {
     return;
   }
@@ -747,6 +710,15 @@ const applyRulesFromWorkspace = (rulesetDir: string, source: string): void => {
   execGit(["push"], workspaceRoot);
 };
 
+// A resolved rules source: its on-disk rules root, the source repo root (which
+// holds `agent-profiles.json`), and the ref label used for rule provenance.
+type SourceContext = {
+  source: string;
+  rulesRoot: string;
+  sourceRoot: string;
+  resolvedRef?: string;
+};
+
 const resolveRulesRoot = (
   rulesetDir: string,
   source: string,
@@ -759,28 +731,37 @@ const resolveRulesRoot = (
   return { rulesRoot: resolveLocalRulesRoot(rulesetDir, source) };
 };
 
+const resolveSourceContexts = (
+  rulesetDir: string,
+  sources: string[],
+  refresh: boolean
+): SourceContext[] =>
+  sources.map((source) => {
+    const { rulesRoot, resolvedRef } = resolveRulesRoot(rulesetDir, source, refresh);
+    return {
+      source,
+      rulesRoot,
+      sourceRoot: path.dirname(rulesRoot),
+      resolvedRef
+    };
+  });
+
 const formatRuleSourcePath = (
   rulePath: string,
-  rulesRoot: string,
-  rulesetDir: string,
-  source: string,
-  resolvedRef?: string
+  context: SourceContext,
+  rulesetDir: string
 ): string => {
-  // Check if this rule is from the resolved rulesRoot (GitHub or local source)
-  const isFromSource = rulePath.startsWith(rulesRoot);
+  const isFromSource = rulePath.startsWith(context.rulesRoot);
 
-  if (isFromSource && source.startsWith("github:")) {
-    // GitHub source rule
-    const parsed = parseGithubSource(source);
-    const cacheRepoRoot = path.dirname(rulesRoot);
+  if (isFromSource && context.source.startsWith("github:")) {
+    const parsed = parseGithubSource(context.source);
+    const cacheRepoRoot = path.dirname(context.rulesRoot);
     const relativePath = normalizePath(path.relative(cacheRepoRoot, rulePath));
-    const refToUse = resolvedRef ?? parsed.ref;
+    const refToUse = context.resolvedRef ?? parsed.ref;
     return `github:${parsed.owner}/${parsed.repo}@${refToUse}/${relativePath}`;
   }
 
-  // For local rules (either from local source or extra), use path relative to project root
-  const result = normalizePath(path.relative(rulesetDir, rulePath));
-  return result;
+  return normalizePath(path.relative(rulesetDir, rulePath));
 };
 
 const getGlobalOutputPaths = (): string[] => [
@@ -887,6 +868,96 @@ const buildScopeDiff = (
   };
 };
 
+type RulePart = { name: string; content: string };
+
+const buildRulePart = (rulePath: string, context: SourceContext, rulesetDir: string): RulePart => {
+  const body = normalizeTrailingWhitespace(fs.readFileSync(rulePath, "utf8"));
+  const sourcePath = formatRuleSourcePath(rulePath, context, rulesetDir);
+  return {
+    name: path.basename(rulePath),
+    content: `Source: ${sourcePath}\n\n${body}`
+  };
+};
+
+// Collects global rule parts across every source, in source order. Sources
+// without a `rules/global` directory are skipped.
+const collectGlobalParts = (sourceContexts: SourceContext[], rulesetDir: string): RulePart[] => {
+  const parts: RulePart[] = [];
+  for (const context of sourceContexts) {
+    const globalRoot = path.join(context.rulesRoot, "global");
+    if (!isExistingDirectory(globalRoot)) {
+      continue;
+    }
+    for (const rulePath of collectMarkdownFiles(globalRoot)) {
+      parts.push(buildRulePart(rulePath, context, rulesetDir));
+    }
+  }
+  return parts;
+};
+
+// Collects repository (domain) rule parts. Domains are chosen by the profile
+// manifest of each source. Overlays are preserved: the same domain in multiple
+// sources contributes each source's content in source order (no de-duplication).
+const collectRepositoryParts = (
+  sourceContexts: SourceContext[],
+  profile: string,
+  rulesetDir: string
+): RulePart[] => {
+  const sourceRoots = sourceContexts.map((context) => context.sourceRoot);
+  const selections = resolveProfileSelections(sourceRoots, profile);
+
+  if (selections.length === 0) {
+    throw new Error(
+      `Profile "${profile}" is not defined by any source ` +
+        `(checked: ${sourceContexts.map((context) => context.source).join(", ")}). ` +
+        `Define it under "profiles" in an agent-profiles.json at a source root.`
+    );
+  }
+
+  const parts: RulePart[] = [];
+  for (const selection of selections) {
+    const context = sourceContexts[selection.index];
+    const domainsRoot = path.join(context.rulesRoot, "domains");
+    for (const domain of selection.domains) {
+      const domainRoot = path.resolve(domainsRoot, domain);
+      if (!isSubPath(domainsRoot, domainRoot)) {
+        throw new Error(
+          `Domain "${domain}" for profile "${profile}" resolves outside rules/domains in ` +
+            `source ${context.source}. Use a safe domain directory name.`
+        );
+      }
+      // Refuse symlinked/junction domain directories: a malicious source could
+      // point rules/domains/<domain> at any location on disk and bypass the
+      // declared rules boundary even though the path resolves under it.
+      let domainLstat: fs.Stats | null = null;
+      try {
+        domainLstat = fs.lstatSync(domainRoot);
+      } catch {
+        domainLstat = null;
+      }
+      if (domainLstat?.isSymbolicLink()) {
+        throw new Error(
+          `Domain directory "${domain}" for profile "${profile}" is a symbolic link: ` +
+            `${normalizePath(domainRoot)}. ` +
+            `Use a real directory under rules/domains/${domain} in source ${context.source}.`
+        );
+      }
+      if (!isExistingDirectory(domainRoot)) {
+        throw new Error(
+          `Domain directory "${domain}" for profile "${profile}" not found: ` +
+            `${normalizePath(domainRoot)}. ` +
+            `Ensure rules/domains/${domain} exists in source ${context.source}.`
+        );
+      }
+      for (const rulePath of collectMarkdownFiles(domainRoot)) {
+        parts.push(buildRulePart(rulePath, context, rulesetDir));
+      }
+    }
+  }
+
+  return parts;
+};
+
 const composeRuleset = (
   rulesetPath: string,
   rootDir: string,
@@ -900,54 +971,23 @@ const composeRuleset = (
   );
   const composedOutputPath = toDisplayPath(rootDir, primaryOutputPath);
 
-  const { rulesRoot, resolvedRef } = resolveRulesRoot(
+  const sourceContexts = resolveSourceContexts(
     rulesetDir,
-    projectRuleset.source,
+    projectRuleset.sources,
     options.refresh ?? false
   );
-  const globalRoot = path.join(rulesRoot, "global");
-  const domainsRoot = path.join(rulesRoot, "domains");
 
-  const resolvedGlobalRules: string[] = [];
-  const seenGlobalRules = new Set<string>();
-  const resolvedRepositoryRules: string[] = [];
-  const seenRepositoryRules = new Set<string>();
-
-  if (projectRuleset.global !== false) {
-    addRulePaths(collectMarkdownFiles(globalRoot), resolvedGlobalRules, seenGlobalRules);
-  }
-
-  const domains = Array.isArray(projectRuleset.domains) ? projectRuleset.domains : [];
-  for (const domain of domains) {
-    const domainRoot = path.resolve(domainsRoot, domain);
-    addRulePaths(collectMarkdownFiles(domainRoot), resolvedRepositoryRules, seenRepositoryRules);
-  }
-
-  const extraRules = Array.isArray(projectRuleset.extra) ? projectRuleset.extra : [];
-  const directRulePaths = extraRules.map((rulePath) => resolveFrom(rulesetDir, rulePath));
-  addRulePaths(directRulePaths, resolvedRepositoryRules, seenRepositoryRules);
+  const globalParts =
+    projectRuleset.global !== false ? collectGlobalParts(sourceContexts, rulesetDir) : [];
+  const repositoryParts = collectRepositoryParts(
+    sourceContexts,
+    projectRuleset.profile,
+    rulesetDir
+  );
 
   const totalBudget = projectRuleset.budget?.totalTokens ?? DEFAULT_TOTAL_BUDGET;
   const moduleBudget = projectRuleset.budget?.moduleTokens ?? DEFAULT_MODULE_BUDGET;
 
-  const buildRuleParts = (rulePaths: string[]): Array<{ name: string; content: string }> =>
-    rulePaths.map((rulePath) => {
-      const body = normalizeTrailingWhitespace(fs.readFileSync(rulePath, "utf8"));
-      const sourcePath = formatRuleSourcePath(
-        rulePath,
-        rulesRoot,
-        rulesetDir,
-        projectRuleset.source,
-        resolvedRef
-      );
-      return {
-        name: path.basename(rulePath),
-        content: `Source: ${sourcePath}\n\n${body}`
-      };
-    });
-
-  const repositoryParts = buildRuleParts(resolvedRepositoryRules);
-  const globalParts = buildRuleParts(resolvedGlobalRules);
   const repositoryContentParts = repositoryParts.map((part) => part.content);
   const globalContentParts = globalParts.map((part) => part.content);
   const primaryOutputContent = buildInstructionContent(repositoryContentParts, true);
@@ -969,6 +1009,13 @@ const composeRuleset = (
   };
   const repositoryOutputs: string[] = [toDisplayPath(rootDir, primaryOutputPath)];
   const globalOutputs = globalOutputPaths.map((filePath) => toDisplayPath(rootDir, filePath));
+  const repositoryFiles: RepositoryComposedFile[] = [
+    {
+      absolutePath: primaryOutputPath,
+      displayPath: toDisplayPath(rootDir, primaryOutputPath),
+      content: primaryOutputContent
+    }
+  ];
   const composedFiles: Array<{
     absolutePath: string;
     relativePath: string;
@@ -985,11 +1032,17 @@ const composeRuleset = (
 
   if (companionOutputPath) {
     const companionDisplayPath = toDisplayPath(rootDir, companionOutputPath);
+    const companionContent = buildClaudeCompanionContent(primaryOutputPath, companionOutputPath);
     repositoryOutputs.push(companionDisplayPath);
+    repositoryFiles.push({
+      absolutePath: companionOutputPath,
+      displayPath: companionDisplayPath,
+      content: companionContent
+    });
     composedFiles.push({
       absolutePath: companionOutputPath,
       relativePath: companionDisplayPath,
-      content: buildClaudeCompanionContent(primaryOutputPath, companionOutputPath),
+      content: companionContent,
       scope: "repository"
     });
   }
@@ -1016,9 +1069,11 @@ const composeRuleset = (
       outputDiffs.push(repositoryDiff);
     }
 
-    const globalDiff = buildScopeDiff("global", globalOutputPaths, globalOutputContent, rootDir);
-    if (globalDiff) {
-      outputDiffs.push(globalDiff);
+    if (options.emitGlobalDiffs !== false) {
+      const globalDiff = buildScopeDiff("global", globalOutputPaths, globalOutputContent, rootDir);
+      if (globalDiff) {
+        outputDiffs.push(globalDiff);
+      }
     }
   }
 
@@ -1034,31 +1089,36 @@ const composeRuleset = (
     outputs: [...repositoryOutputs, ...globalOutputs],
     repositoryOutputs,
     globalOutputs,
+    repositoryFiles,
     outputDiffs,
     budgetResult
   };
 };
 
+const writeOutputDiff = (diff: OutputGroupDiff): void => {
+  const scopeLabel = diff.scope === "global" ? "Global outputs" : "Repository outputs";
+  if (diff.status === "unchanged") {
+    process.stdout.write(`${scopeLabel} unchanged.\n`);
+    return;
+  }
+
+  process.stdout.write(
+    `${scopeLabel} updated. ACTION (agent): refresh rule recognition from the diff below.\n`
+  );
+  process.stdout.write(`Targets:\n${diff.targets.map((target) => `- ${target}`).join("\n")}\n`);
+  process.stdout.write(`--- BEGIN ${diff.scope.toUpperCase()} DIFF ---\n`);
+  if (diff.patch) {
+    process.stdout.write(diff.patch);
+    if (!diff.patch.endsWith("\n")) {
+      process.stdout.write("\n");
+    }
+  }
+  process.stdout.write(`--- END ${diff.scope.toUpperCase()} DIFF ---\n`);
+};
+
 const printOutputDiffs = (result: ComposeResult): void => {
   for (const diff of result.outputDiffs) {
-    const scopeLabel = diff.scope === "global" ? "Global outputs" : "Repository outputs";
-    if (diff.status === "unchanged") {
-      process.stdout.write(`${scopeLabel} unchanged.\n`);
-      continue;
-    }
-
-    process.stdout.write(
-      `${scopeLabel} updated. ACTION (agent): refresh rule recognition from the diff below.\n`
-    );
-    process.stdout.write(`Targets:\n${diff.targets.map((target) => `- ${target}`).join("\n")}\n`);
-    process.stdout.write(`--- BEGIN ${diff.scope.toUpperCase()} DIFF ---\n`);
-    if (diff.patch) {
-      process.stdout.write(diff.patch);
-      if (!diff.patch.endsWith("\n")) {
-        process.stdout.write("\n");
-      }
-    }
-    process.stdout.write(`--- END ${diff.scope.toUpperCase()} DIFF ---\n`);
+    writeOutputDiff(diff);
   }
 };
 
@@ -1098,19 +1158,24 @@ const formatBudgetReport = (result: BudgetCheckResult): string => {
   return lines.length === 0 ? "" : `${lines.join("\n")}\n`;
 };
 
+const emitBudgetReport = (args: CliArgs, budgetResult: BudgetCheckResult): void => {
+  if (args.quiet) {
+    return;
+  }
+  if (budgetResult.totalExceeded || budgetResult.moduleReviewTriggered) {
+    process.stderr.write(formatBudgetReport(budgetResult));
+  }
+};
+
 type InitPlanItem = {
   action: "create" | "overwrite";
   path: string;
 };
 
-const LOCAL_RULES_TEMPLATE = "# Local Rules\n\n- Add project-specific instructions here.\n";
-
 const buildInitRuleset = (args: CliArgs): ProjectRuleset => {
-  const domains = normalizeListOption(args.domains, "--domains");
-  const extra = normalizeListOption(args.extra, "--extra");
-
   const ruleset: ProjectRuleset = {
-    source: args.source ?? DEFAULT_INIT_SOURCE,
+    sources: [...DEFAULT_INIT_SOURCES],
+    profile: args.profile ?? DEFAULT_INIT_PROFILE,
     output: args.output ?? DEFAULT_OUTPUT,
     claude: {
       enabled: true,
@@ -1122,32 +1187,19 @@ const buildInitRuleset = (args: CliArgs): ProjectRuleset => {
     ruleset.global = false;
   }
 
-  const resolvedDomains = domains ?? DEFAULT_INIT_DOMAINS;
-  if (resolvedDomains.length > 0) {
-    ruleset.domains = resolvedDomains;
-  }
-
-  const resolvedExtra = extra ?? DEFAULT_INIT_EXTRA;
-  if (resolvedExtra.length > 0) {
-    ruleset.extra = resolvedExtra;
-  }
-
   return ruleset;
 };
 
 const formatInitRuleset = (ruleset: ProjectRuleset): string => {
-  const domainsValue = JSON.stringify(ruleset.domains ?? []);
-  const extraValue = JSON.stringify(ruleset.extra ?? []);
+  const sourcesValue = JSON.stringify(ruleset.sources);
   const claudeEnabled = ruleset.claude?.enabled ?? true;
   const claudeOutput = ruleset.claude?.output ?? DEFAULT_CLAUDE_OUTPUT;
   const lines = [
     "{",
-    "  // Rules source. Use github:owner/repo@ref or a local path.",
-    `  "source": "${ruleset.source}",`,
-    "  // Domain folders under rules/domains.",
-    `  "domains": ${domainsValue},`,
-    "  // Additional local rule files to append.",
-    `  "extra": ${extraValue},`
+    "  // Rules sources. Each entry is github:owner/repo@ref or a local path.",
+    `  "sources": ${sourcesValue},`,
+    "  // Profile name defined by a source's agent-profiles.json.",
+    `  "profile": "${ruleset.profile}",`
   ];
 
   if (ruleset.global === false) {
@@ -1211,21 +1263,6 @@ const initProject = async (args: CliArgs, rootDir: string, rulesetName: string):
     plan.push({ action: "create", path: rulesetPath });
   }
 
-  const extraFiles = (ruleset.extra ?? []).map((rulePath) => resolveFrom(rulesetDir, rulePath));
-  const extraToWrite: string[] = [];
-  for (const extraPath of extraFiles) {
-    if (fs.existsSync(extraPath)) {
-      if (args.force) {
-        plan.push({ action: "overwrite", path: extraPath });
-        extraToWrite.push(extraPath);
-      }
-      continue;
-    }
-
-    plan.push({ action: "create", path: extraPath });
-    extraToWrite.push(extraPath);
-  }
-
   if (args.compose) {
     const composedTargets = [
       { path: outputPaths.primaryOutputPath, requireForce: true },
@@ -1282,11 +1319,6 @@ const initProject = async (args: CliArgs, rootDir: string, rulesetName: string):
   fs.mkdirSync(path.dirname(rulesetPath), { recursive: true });
   fs.writeFileSync(`${rulesetPath}`, formatInitRuleset(ruleset), "utf8");
 
-  for (const extraPath of extraToWrite) {
-    fs.mkdirSync(path.dirname(extraPath), { recursive: true });
-    fs.writeFileSync(extraPath, LOCAL_RULES_TEMPLATE, "utf8");
-  }
-
   let composedOutput: ComposeResult | undefined;
   if (args.compose) {
     composedOutput = composeRuleset(rulesetPath, rootDir, {
@@ -1300,7 +1332,6 @@ const initProject = async (args: CliArgs, rootDir: string, rulesetName: string):
       JSON.stringify(
         {
           initialized: [toDisplayPath(rootDir, rulesetPath)],
-          localRules: extraToWrite.map((filePath) => toDisplayPath(rootDir, filePath)),
           composed: composedOutput ? composedOutput.outputs : [],
           repositoryOutputs: composedOutput ? composedOutput.repositoryOutputs : [],
           globalOutputs: composedOutput ? composedOutput.globalOutputs : [],
@@ -1313,22 +1344,10 @@ const initProject = async (args: CliArgs, rootDir: string, rulesetName: string):
     );
   } else if (!args.quiet) {
     process.stdout.write(`Initialized ruleset:\n- ${toDisplayPath(rootDir, rulesetPath)}\n`);
-    if (extraToWrite.length > 0) {
-      process.stdout.write(
-        `Initialized local rules:\n${extraToWrite
-          .map((filePath) => `- ${toDisplayPath(rootDir, filePath)}`)
-          .join("\n")}\n`
-      );
-    }
     if (composedOutput) {
       process.stdout.write(formatComposedOutputs(composedOutput));
       printOutputDiffs(composedOutput);
-      if (
-        composedOutput.budgetResult.totalExceeded ||
-        composedOutput.budgetResult.moduleReviewTriggered
-      ) {
-        process.stderr.write(formatBudgetReport(composedOutput.budgetResult));
-      }
+      emitBudgetReport(args, composedOutput.budgetResult);
     }
   }
 };
@@ -1362,6 +1381,91 @@ const ensureSingleRuleset = (
   }
 
   return rulesetFiles[0];
+};
+
+// Verifies that the generated repository outputs (AGENTS.md and, when enabled,
+// the Claude companion) match what compose would produce. Never writes files
+// and never inspects the user-global outputs. Exits non-zero when stale.
+const runCheck = (rulesetPath: string, rootDir: string, args: CliArgs): void => {
+  const result = composeRuleset(rulesetPath, rootDir, {
+    refresh: args.refresh ?? false,
+    dryRun: true,
+    emitDiffs: true,
+    emitGlobalDiffs: false
+  });
+
+  const staleFiles = result.repositoryFiles.filter((file) => {
+    const current = fs.existsSync(file.absolutePath)
+      ? fs.readFileSync(file.absolutePath, "utf8")
+      : null;
+    return current !== file.content;
+  });
+
+  const upToDate = staleFiles.length === 0;
+
+  if (args.json) {
+    process.stdout.write(
+      JSON.stringify(
+        {
+          check: true,
+          upToDate,
+          repositoryOutputs: result.repositoryOutputs,
+          stale: staleFiles.map((file) => file.displayPath)
+        },
+        null,
+        2
+      ) + "\n"
+    );
+  } else if (!args.quiet) {
+    if (upToDate) {
+      process.stdout.write(
+        `Repository outputs are up to date:\n${result.repositoryOutputs
+          .map((filePath) => `- ${filePath}`)
+          .join("\n")}\n`
+      );
+    } else {
+      process.stdout.write(
+        `Stale repository outputs (run compose-agentsmd to regenerate):\n${staleFiles
+          .map((file) => `- ${file.displayPath}`)
+          .join("\n")}\n`
+      );
+      for (const diff of result.outputDiffs) {
+        if (diff.scope === "repository" && diff.status === "updated") {
+          writeOutputDiff(diff);
+        }
+      }
+    }
+  }
+
+  if (!upToDate) {
+    process.exitCode = 1;
+  }
+};
+
+const printEditRulesGuidance = (rulesetDir: string, ruleset: ProjectRuleset): void => {
+  const lines: string[] = [];
+  for (const source of ruleset.sources) {
+    let workspaceRoot = resolveWorkspaceRoot(rulesetDir, source);
+    if (source.startsWith("github:")) {
+      workspaceRoot = ensureWorkspaceForGithubSource(source);
+    }
+
+    const rulesDirectory = source.startsWith("github:")
+      ? path.join(workspaceRoot, "rules")
+      : resolveLocalRulesRoot(rulesetDir, source);
+
+    lines.push(`Rules workspace: ${workspaceRoot}`);
+    lines.push(`Rules directory: ${rulesDirectory}`);
+  }
+
+  lines.push("Next steps:");
+  lines.push("- Edit rule files under the listed rules directories.");
+  lines.push("- If a source is GitHub, commit and push the workspace changes before apply-rules.");
+  lines.push(
+    "- Run compose-agentsmd apply-rules from your project root to apply updates and regenerate instruction files."
+  );
+
+  process.stdout.write(lines.join("\n") + "\n");
 };
 
 const main = async (): Promise<void> => {
@@ -1404,26 +1508,7 @@ const main = async (): Promise<void> => {
     const rulesetPath = ensureSingleRuleset(rulesetFiles, rootDir, rulesetName);
     const rulesetDir = path.dirname(rulesetPath);
     const ruleset = readProjectRuleset(rulesetPath);
-
-    let workspaceRoot = resolveWorkspaceRoot(rulesetDir, ruleset.source);
-    if (ruleset.source.startsWith("github:")) {
-      workspaceRoot = ensureWorkspaceForGithubSource(ruleset.source);
-    }
-
-    const rulesDirectory = ruleset.source.startsWith("github:")
-      ? path.join(workspaceRoot, "rules")
-      : resolveLocalRulesRoot(rulesetDir, ruleset.source);
-
-    process.stdout.write(
-      [
-        `Rules workspace: ${workspaceRoot}`,
-        `Rules directory: ${rulesDirectory}`,
-        "Next steps:",
-        `- Edit rule files under: ${rulesDirectory}`,
-        "- If this source is GitHub, commit and push the workspace changes before apply-rules.",
-        "- Run compose-agentsmd apply-rules from your project root to apply updates and regenerate instruction files."
-      ].join("\n") + "\n"
-    );
+    printEditRulesGuidance(rulesetDir, ruleset);
     return;
   }
 
@@ -1432,12 +1517,20 @@ const main = async (): Promise<void> => {
     return;
   }
 
+  if (command === "check") {
+    const rulesetPath = ensureSingleRuleset(rulesetFiles, rootDir, rulesetName);
+    runCheck(rulesetPath, rootDir, args);
+    return;
+  }
+
   if (command === "apply-rules") {
     const rulesetPath = ensureSingleRuleset(rulesetFiles, rootDir, rulesetName);
-    const rulesetDir = path.dirname(rulesetPath);
     const ruleset = readProjectRuleset(rulesetPath);
 
-    applyRulesFromWorkspace(rulesetDir, ruleset.source);
+    for (const source of ruleset.sources) {
+      applyRulesFromWorkspace(source);
+    }
+
     const output = composeRuleset(rulesetPath, rootDir, {
       refresh: true,
       dryRun: args.dryRun,
@@ -1460,9 +1553,7 @@ const main = async (): Promise<void> => {
     } else if (!args.quiet) {
       process.stdout.write(formatComposedOutputs(output));
       printOutputDiffs(output);
-      if (output.budgetResult.totalExceeded || output.budgetResult.moduleReviewTriggered) {
-        process.stderr.write(formatBudgetReport(output.budgetResult));
-      }
+      emitBudgetReport(args, output.budgetResult);
     }
     return;
   }
@@ -1501,6 +1592,7 @@ const main = async (): Promise<void> => {
         outputs: outputs.flatMap((result) => result.outputs),
         repositoryOutputs: outputs.flatMap((result) => result.repositoryOutputs),
         globalOutputs: outputs.flatMap((result) => result.globalOutputs),
+        repositoryFiles: outputs.flatMap((result) => result.repositoryFiles),
         outputDiffs: [],
         budgetResult: outputs[0].budgetResult
       })
@@ -1509,9 +1601,7 @@ const main = async (): Promise<void> => {
       printOutputDiffs(result);
     }
     for (const result of outputs) {
-      if (result.budgetResult.totalExceeded || result.budgetResult.moduleReviewTriggered) {
-        process.stderr.write(formatBudgetReport(result.budgetResult));
-      }
+      emitBudgetReport(args, result.budgetResult);
     }
   }
 };

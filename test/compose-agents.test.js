@@ -20,6 +20,9 @@ const writeFile = (filePath, content) => {
 
 const normalizeTrailingWhitespace = (content) => content.replace(/\s+$/u, "");
 const normalizePath = (value) => value.replace(/\\/g, "/");
+const relSource = (projectRoot, sourceRoot) =>
+  normalizePath(path.relative(projectRoot, sourceRoot));
+
 const stripJsonComments = (input) => {
   let output = "";
   let inString = false;
@@ -89,6 +92,7 @@ const stripJsonComments = (input) => {
 
   return output;
 };
+
 const TOOL_RULES = normalizeTrailingWhitespace(
   fs.readFileSync(path.join(repoRoot, "tools", "tool-rules.md"), "utf8")
 );
@@ -103,6 +107,7 @@ const DEFAULT_COMPOSED_OUTPUTS = [...DEFAULT_REPOSITORY_OUTPUTS, ...DEFAULT_GLOB
 const BUDGET_TOKENIZER = "o200k_base";
 const DEFAULT_TOTAL_BUDGET = 8000;
 const DEFAULT_MODULE_BUDGET = 800;
+const BASE_PROFILE = "base";
 
 const createCliEnv = (home, extra = {}) => ({
   ...extra,
@@ -139,6 +144,15 @@ const runCliResult = (args, options) => {
   return { stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
 };
 
+const runCliStatus = (args, options) => {
+  const result = spawnSync(process.execPath, [cliPath, ...args], {
+    cwd: options.cwd,
+    env: resolveCliEnv(options),
+    encoding: "utf8"
+  });
+  return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+};
+
 const DEFAULT_BUDGET_OK = {
   tokenizer: BUDGET_TOKENIZER,
   totalBudget: DEFAULT_TOTAL_BUDGET,
@@ -166,6 +180,29 @@ const buildExpectedBudget = (blocks, overrides = {}) => ({
   ...overrides
 });
 
+// Writes an agent-profiles.json at a source root mapping profile names to domains.
+const writeProfileManifest = (sourceRoot, profiles) => {
+  writeFile(path.join(sourceRoot, "agent-profiles.json"), JSON.stringify({ profiles }, null, 2));
+};
+
+// Writes a source that defines the base profile with the given (default empty) domains
+// plus a single global rule module, so global-only tests have a valid profile.
+const writeBaseSource = (sourceRoot, { domains = [], global = "# Only\n1" } = {}) => {
+  writeProfileManifest(sourceRoot, { [BASE_PROFILE]: { domains } });
+  if (global !== null) {
+    writeFile(path.join(sourceRoot, "rules", "global", "only.md"), global);
+  }
+};
+
+const withTempRoot = (run) => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
+  try {
+    return run(tempRoot);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+};
+
 it("scopes the session gate to externally supplied instructions", () => {
   expect(TOOL_RULES).toContain("externally supplied human/operator instruction");
   expect(TOOL_RULES).toContain("run `compose-agentsmd` once");
@@ -181,21 +218,19 @@ it("prints version with --version and -V", () => {
   expect(stdoutShort).toBe(expected);
 });
 
-it("prints verbose diagnostics with -v", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
-
-  try {
+it("prints verbose diagnostics with -v", () =>
+  withTempRoot((tempRoot) => {
     const cliEnv = createCliEnv(path.join(tempRoot, "home"));
     const projectRoot = path.join(tempRoot, "project");
     const sourceRoot = path.join(tempRoot, "rules-source");
-    const rulesRoot = path.join(sourceRoot, "rules");
 
+    writeBaseSource(sourceRoot);
     writeFile(
       path.join(projectRoot, "agent-ruleset.json"),
       JSON.stringify(
         {
-          source: path.relative(projectRoot, sourceRoot),
-          global: true,
+          sources: [relSource(projectRoot, sourceRoot)],
+          profile: BASE_PROFILE,
           output: "AGENTS.md"
         },
         null,
@@ -203,72 +238,52 @@ it("prints verbose diagnostics with -v", () => {
       )
     );
 
-    writeFile(path.join(rulesRoot, "global", "only.md"), "# Only\n1");
-
     const stdout = runCli(["-v", "--root", projectRoot], { cwd: repoRoot, env: cliEnv });
     expect(stdout).toMatch(/Verbose:/u);
     expect(stdout).toMatch(/Ruleset files:/u);
     expect(stdout).toMatch(/Composed instruction files:/u);
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
+  }));
 
-it("composes AGENTS.md using local source and extra rules", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
-
-  try {
+// (1) schema accepts sources + profile and composes selected domains.
+it("composes AGENTS.md using sources and a profile", () =>
+  withTempRoot((tempRoot) => {
     const fakeHome = path.join(tempRoot, "home");
     const cliEnv = createCliEnv(fakeHome);
     const projectRoot = path.join(tempRoot, "project");
     const sourceRoot = path.join(tempRoot, "rules-source");
     const rulesRoot = path.join(sourceRoot, "rules");
 
+    writeProfileManifest(sourceRoot, { "node-cli": { domains: ["node"] } });
+    writeFile(path.join(rulesRoot, "global", "a.md"), "# Global A\nA");
+    writeFile(path.join(rulesRoot, "global", "b.md"), "# Global B\nB");
+    writeFile(path.join(rulesRoot, "domains", "node", "c.md"), "# Domain C\nC");
+
     writeFile(
       path.join(projectRoot, "agent-ruleset.json"),
       JSON.stringify(
-        {
-          source: path.relative(projectRoot, sourceRoot),
-          global: true,
-          output: "AGENTS.md",
-          domains: ["node"],
-          extra: ["agent-rules-local/custom.md"]
-        },
+        { sources: [relSource(projectRoot, sourceRoot)], profile: "node-cli", output: "AGENTS.md" },
         null,
         2
       )
     );
 
-    writeFile(path.join(projectRoot, "agent-rules-local", "custom.md"), "# Custom\nlocal");
-
-    writeFile(path.join(rulesRoot, "global", "a.md"), "# Global A\nA");
-    writeFile(path.join(rulesRoot, "global", "b.md"), "# Global B\nB");
-    writeFile(path.join(rulesRoot, "domains", "node", "c.md"), "# Domain C\nC");
-
     const stdout = runCli(["--root", projectRoot], { cwd: repoRoot, env: cliEnv });
     expect(stdout).toMatch(/Composed instruction files:/u);
 
-    const outputPath = path.join(projectRoot, "AGENTS.md");
-    const output = fs.readFileSync(outputPath, "utf8");
-
-    const expected = withToolRules(
-      [
+    const output = fs.readFileSync(path.join(projectRoot, "AGENTS.md"), "utf8");
+    expect(output).toBe(
+      withToolRules(
         formatRuleBlock(
           path.join(rulesRoot, "domains", "node", "c.md"),
           "# Domain C\nC",
           projectRoot
-        ),
-        formatRuleBlock(
-          path.join(projectRoot, "agent-rules-local", "custom.md"),
-          "# Custom\nlocal",
-          projectRoot
-        )
-      ].join("\n\n") + "\n"
+        ) + "\n"
+      )
     );
 
-    expect(output).toBe(expected);
     const claudeOutput = fs.readFileSync(path.join(projectRoot, "CLAUDE.md"), "utf8");
     expect(claudeOutput).toBe("@AGENTS.md\n");
+
     const expectedGlobalOutput = withComposedHeader(
       [
         formatRuleBlock(path.join(rulesRoot, "global", "a.md"), "# Global A\nA", projectRoot),
@@ -283,124 +298,515 @@ it("composes AGENTS.md using local source and extra rules", () => {
     ]) {
       expect(fs.readFileSync(globalPath, "utf8")).toBe(expectedGlobalOutput);
     }
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
+  }));
 
-it("creates CLAUDE companion by default", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
-
-  try {
+// (8) at least one source defining the requested profile succeeds.
+it("composes when a source defines the requested profile", () =>
+  withTempRoot((tempRoot) => {
     const cliEnv = createCliEnv(path.join(tempRoot, "home"));
     const projectRoot = path.join(tempRoot, "project");
     const sourceRoot = path.join(tempRoot, "rules-source");
     const rulesRoot = path.join(sourceRoot, "rules");
+
+    writeProfileManifest(sourceRoot, { "node-cli": { domains: ["node"] } });
+    writeFile(path.join(rulesRoot, "domains", "node", "n.md"), "# Node\nN");
 
     writeFile(
       path.join(projectRoot, "agent-ruleset.json"),
-      JSON.stringify({ source: path.relative(projectRoot, sourceRoot) }, null, 2)
+      JSON.stringify(
+        { sources: [relSource(projectRoot, sourceRoot)], profile: "node-cli" },
+        null,
+        2
+      )
     );
-    writeFile(path.join(rulesRoot, "global", "only.md"), "# Only\n1");
 
     runCli(["--root", projectRoot], { cwd: repoRoot, env: cliEnv });
+    const output = fs.readFileSync(path.join(projectRoot, "AGENTS.md"), "utf8");
+    expect(output).toBe(
+      withToolRules(
+        formatRuleBlock(path.join(rulesRoot, "domains", "node", "n.md"), "# Node\nN", projectRoot) +
+          "\n"
+      )
+    );
+  }));
 
-    expect(fs.existsSync(path.join(projectRoot, "AGENTS.md"))).toBe(true);
-    expect(fs.existsSync(path.join(projectRoot, "CLAUDE.md"))).toBe(true);
-    expect(fs.readFileSync(path.join(projectRoot, "CLAUDE.md"), "utf8")).toBe("@AGENTS.md\n");
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
-
-it("supports disabling CLAUDE companion via ruleset", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
-
-  try {
+// (9) profile domains are expanded in declared order.
+it("expands profile domains in declared order", () =>
+  withTempRoot((tempRoot) => {
     const cliEnv = createCliEnv(path.join(tempRoot, "home"));
     const projectRoot = path.join(tempRoot, "project");
     const sourceRoot = path.join(tempRoot, "rules-source");
     const rulesRoot = path.join(sourceRoot, "rules");
+
+    writeProfileManifest(sourceRoot, { ordered: { domains: ["alpha", "beta"] } });
+    writeFile(path.join(rulesRoot, "domains", "alpha", "a.md"), "# Alpha\nA");
+    writeFile(path.join(rulesRoot, "domains", "beta", "b.md"), "# Beta\nB");
+
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify({ sources: [relSource(projectRoot, sourceRoot)], profile: "ordered" }, null, 2)
+    );
+
+    runCli(["--root", projectRoot], { cwd: repoRoot, env: cliEnv });
+    const output = fs.readFileSync(path.join(projectRoot, "AGENTS.md"), "utf8");
+    const alphaBlock = formatRuleBlock(
+      path.join(rulesRoot, "domains", "alpha", "a.md"),
+      "# Alpha\nA",
+      projectRoot
+    );
+    const betaBlock = formatRuleBlock(
+      path.join(rulesRoot, "domains", "beta", "b.md"),
+      "# Beta\nB",
+      projectRoot
+    );
+    expect(output).toBe(withToolRules([alphaBlock, betaBlock].join("\n\n") + "\n"));
+    expect(output.indexOf("# Alpha")).toBeLessThan(output.indexOf("# Beta"));
+  }));
+
+// (10) multiple sources are expanded in source order.
+it("expands multiple sources in source order", () =>
+  withTempRoot((tempRoot) => {
+    const cliEnv = createCliEnv(path.join(tempRoot, "home"));
+    const projectRoot = path.join(tempRoot, "project");
+    const sourceA = path.join(tempRoot, "source-a");
+    const sourceB = path.join(tempRoot, "source-b");
+
+    writeProfileManifest(sourceA, { shared: { domains: ["one"] } });
+    writeFile(path.join(sourceA, "rules", "domains", "one", "a.md"), "# One\nA");
+    writeProfileManifest(sourceB, { shared: { domains: ["two"] } });
+    writeFile(path.join(sourceB, "rules", "domains", "two", "b.md"), "# Two\nB");
 
     writeFile(
       path.join(projectRoot, "agent-ruleset.json"),
       JSON.stringify(
         {
-          source: path.relative(projectRoot, sourceRoot),
-          claude: {
-            enabled: false
-          }
+          sources: [relSource(projectRoot, sourceA), relSource(projectRoot, sourceB)],
+          profile: "shared"
         },
         null,
         2
       )
     );
-    writeFile(path.join(rulesRoot, "global", "only.md"), "# Only\n1");
+
+    runCli(["--root", projectRoot], { cwd: repoRoot, env: cliEnv });
+    const output = fs.readFileSync(path.join(projectRoot, "AGENTS.md"), "utf8");
+    const oneBlock = formatRuleBlock(
+      path.join(sourceA, "rules", "domains", "one", "a.md"),
+      "# One\nA",
+      projectRoot
+    );
+    const twoBlock = formatRuleBlock(
+      path.join(sourceB, "rules", "domains", "two", "b.md"),
+      "# Two\nB",
+      projectRoot
+    );
+    expect(output).toBe(withToolRules([oneBlock, twoBlock].join("\n\n") + "\n"));
+    expect(output.indexOf("# One")).toBeLessThan(output.indexOf("# Two"));
+  }));
+
+// (10, overlay) same domain in multiple sources is composed without de-duplication.
+it("layers the same domain from multiple sources without de-duplication", () =>
+  withTempRoot((tempRoot) => {
+    const cliEnv = createCliEnv(path.join(tempRoot, "home"));
+    const projectRoot = path.join(tempRoot, "project");
+    const publicSource = path.join(tempRoot, "public");
+    const overlaySource = path.join(tempRoot, "overlay");
+
+    writeProfileManifest(publicSource, { "course-docs": { domains: ["docs"] } });
+    writeFile(path.join(publicSource, "rules", "domains", "docs", "base.md"), "# Public\nP");
+    writeProfileManifest(overlaySource, { "course-docs": { domains: ["docs"] } });
+    writeFile(path.join(overlaySource, "rules", "domains", "docs", "extra.md"), "# Overlay\nO");
+
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify(
+        {
+          sources: [relSource(projectRoot, publicSource), relSource(projectRoot, overlaySource)],
+          profile: "course-docs"
+        },
+        null,
+        2
+      )
+    );
+
+    runCli(["--root", projectRoot], { cwd: repoRoot, env: cliEnv });
+    const output = fs.readFileSync(path.join(projectRoot, "AGENTS.md"), "utf8");
+    expect(output).toContain("# Public");
+    expect(output).toContain("# Overlay");
+    expect(output.indexOf("# Public")).toBeLessThan(output.indexOf("# Overlay"));
+  }));
+
+// (6) a source without agent-profiles.json is skipped for profile resolution.
+it("skips a source without a profile manifest", () =>
+  withTempRoot((tempRoot) => {
+    const cliEnv = createCliEnv(path.join(tempRoot, "home"));
+    const projectRoot = path.join(tempRoot, "project");
+    const noManifest = path.join(tempRoot, "no-manifest");
+    const withManifest = path.join(tempRoot, "with-manifest");
+
+    // No agent-profiles.json here; its domain must never be composed.
+    writeFile(path.join(noManifest, "rules", "domains", "ignored", "x.md"), "# Ignored\nX");
+    writeProfileManifest(withManifest, { p: { domains: ["kept"] } });
+    writeFile(path.join(withManifest, "rules", "domains", "kept", "y.md"), "# Kept\nY");
+
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify(
+        {
+          sources: [relSource(projectRoot, noManifest), relSource(projectRoot, withManifest)],
+          profile: "p"
+        },
+        null,
+        2
+      )
+    );
+
+    runCli(["--root", projectRoot], { cwd: repoRoot, env: cliEnv });
+    const output = fs.readFileSync(path.join(projectRoot, "AGENTS.md"), "utf8");
+    expect(output).toContain("# Kept");
+    expect(output).not.toContain("# Ignored");
+  }));
+
+// (7) a source whose manifest lacks the requested profile is skipped.
+it("skips a source whose manifest lacks the requested profile", () =>
+  withTempRoot((tempRoot) => {
+    const cliEnv = createCliEnv(path.join(tempRoot, "home"));
+    const projectRoot = path.join(tempRoot, "project");
+    const otherProfile = path.join(tempRoot, "other");
+    const wantedProfile = path.join(tempRoot, "wanted");
+
+    writeProfileManifest(otherProfile, { different: { domains: ["nope"] } });
+    writeFile(path.join(otherProfile, "rules", "domains", "nope", "x.md"), "# Nope\nX");
+    writeProfileManifest(wantedProfile, { p: { domains: ["yes"] } });
+    writeFile(path.join(wantedProfile, "rules", "domains", "yes", "y.md"), "# Yes\nY");
+
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify(
+        {
+          sources: [relSource(projectRoot, otherProfile), relSource(projectRoot, wantedProfile)],
+          profile: "p"
+        },
+        null,
+        2
+      )
+    );
+
+    runCli(["--root", projectRoot], { cwd: repoRoot, env: cliEnv });
+    const output = fs.readFileSync(path.join(projectRoot, "AGENTS.md"), "utf8");
+    expect(output).toContain("# Yes");
+    expect(output).not.toContain("# Nope");
+  }));
+
+// (5) an unknown profile fails when no source defines it.
+it("fails when no source defines the requested profile", () =>
+  withTempRoot((tempRoot) => {
+    const projectRoot = path.join(tempRoot, "project");
+    const sourceRoot = path.join(tempRoot, "rules-source");
+
+    writeProfileManifest(sourceRoot, { known: { domains: [] } });
+    fs.mkdirSync(path.join(sourceRoot, "rules"), { recursive: true });
+
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify({ sources: [relSource(projectRoot, sourceRoot)], profile: "missing" }, null, 2)
+    );
+
+    expect(() => runCli(["--root", projectRoot], { cwd: repoRoot })).toThrow(
+      /Profile "missing" is not defined by any source/u
+    );
+  }));
+
+// (11) a missing domain directory fails.
+it("fails when a profile domain directory is missing", () =>
+  withTempRoot((tempRoot) => {
+    const projectRoot = path.join(tempRoot, "project");
+    const sourceRoot = path.join(tempRoot, "rules-source");
+
+    writeProfileManifest(sourceRoot, { p: { domains: ["ghost"] } });
+    fs.mkdirSync(path.join(sourceRoot, "rules"), { recursive: true });
+
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify({ sources: [relSource(projectRoot, sourceRoot)], profile: "p" }, null, 2)
+    );
+
+    expect(() => runCli(["--root", projectRoot], { cwd: repoRoot })).toThrow(
+      /Domain directory "ghost" for profile "p" not found/u
+    );
+  }));
+
+it("rejects profile domains that are not safe directory names", () =>
+  withTempRoot((tempRoot) => {
+    const projectRoot = path.join(tempRoot, "project");
+    const sourceRoot = path.join(tempRoot, "rules-source");
+
+    writeProfileManifest(sourceRoot, { p: { domains: ["../global"] } });
+    fs.mkdirSync(path.join(sourceRoot, "rules", "global"), { recursive: true });
+
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify({ sources: [relSource(projectRoot, sourceRoot)], profile: "p" }, null, 2)
+    );
+
+    expect(() => runCli(["--root", projectRoot], { cwd: repoRoot })).toThrow(
+      /Invalid profile manifest/u
+    );
+  }));
+
+it("does not follow symlinks or junctions when collecting domain rules", () =>
+  withTempRoot((tempRoot) => {
+    const cliEnv = createCliEnv(path.join(tempRoot, "home"));
+    const projectRoot = path.join(tempRoot, "project");
+    const sourceRoot = path.join(tempRoot, "rules-source");
+    const secretsDir = path.join(sourceRoot, "secrets");
+
+    fs.mkdirSync(path.join(sourceRoot, "rules", "domains", "node"), { recursive: true });
+    fs.mkdirSync(secretsDir, { recursive: true });
+    writeFile(path.join(secretsDir, "secret.md"), "# Secret\nleaked-marker");
+    try {
+      fs.symlinkSync(
+        secretsDir,
+        path.join(sourceRoot, "rules", "domains", "node", "leak"),
+        "junction"
+      );
+    } catch (error) {
+      // Junctions require Windows; skip the test gracefully if the host denies creation.
+      if (error && typeof error === "object" && "code" in error && error.code === "EPERM") {
+        return;
+      }
+      throw error;
+    }
+
+    writeProfileManifest(sourceRoot, { p: { domains: ["node"] } });
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify({ sources: [relSource(projectRoot, sourceRoot)], profile: "p" }, null, 2)
+    );
+
+    runCli(["--root", projectRoot], { cwd: repoRoot, env: cliEnv });
+    const output = fs.readFileSync(path.join(projectRoot, "AGENTS.md"), "utf8");
+    expect(output).not.toContain("leaked-marker");
+  }));
+
+it("rejects domain directories that are symlinks or junctions", () =>
+  withTempRoot((tempRoot) => {
+    const projectRoot = path.join(tempRoot, "project");
+    const sourceRoot = path.join(tempRoot, "rules-source");
+    const secretsDir = path.join(sourceRoot, "secrets");
+
+    fs.mkdirSync(path.join(sourceRoot, "rules", "domains"), { recursive: true });
+    fs.mkdirSync(secretsDir, { recursive: true });
+    writeFile(path.join(secretsDir, "secret.md"), "# Secret\nleaked-marker");
+    try {
+      fs.symlinkSync(secretsDir, path.join(sourceRoot, "rules", "domains", "evil"), "junction");
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "EPERM") {
+        return;
+      }
+      throw error;
+    }
+
+    writeProfileManifest(sourceRoot, { p: { domains: ["evil"] } });
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify({ sources: [relSource(projectRoot, sourceRoot)], profile: "p" }, null, 2)
+    );
+
+    expect(() => runCli(["--root", projectRoot], { cwd: repoRoot })).toThrow(
+      /Domain directory "evil" for profile "p" is a symbolic link/u
+    );
+  }));
+
+// (12) legacy extra files are no longer read.
+it("does not read local extra files", () =>
+  withTempRoot((tempRoot) => {
+    const cliEnv = createCliEnv(path.join(tempRoot, "home"));
+    const projectRoot = path.join(tempRoot, "project");
+    const sourceRoot = path.join(tempRoot, "rules-source");
+
+    writeProfileManifest(sourceRoot, { p: { domains: ["node"] } });
+    writeFile(path.join(sourceRoot, "rules", "domains", "node", "n.md"), "# Node\nN");
+    // A stray local rules file must be ignored (no `extra` mechanism exists).
+    writeFile(
+      path.join(projectRoot, "agent-rules-local", "custom.md"),
+      "# Custom\nlocal-extra-marker"
+    );
+
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify({ sources: [relSource(projectRoot, sourceRoot)], profile: "p" }, null, 2)
+    );
+
+    runCli(["--root", projectRoot], { cwd: repoRoot, env: cliEnv });
+    const output = fs.readFileSync(path.join(projectRoot, "AGENTS.md"), "utf8");
+    expect(output).toContain("# Node");
+    expect(output).not.toContain("local-extra-marker");
+  }));
+
+// (2) schema rejects the old `source` key.
+it("rejects the legacy source key", () =>
+  withTempRoot((tempRoot) => {
+    const projectRoot = path.join(tempRoot, "project");
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify({ sources: ["local"], profile: "p", source: "github:owner/repo" }, null, 2)
+    );
+
+    expect(() => runCli(["--root", projectRoot], { cwd: repoRoot })).toThrow(
+      /Invalid ruleset schema .*(must NOT have additional properties|source)/u
+    );
+  }));
+
+// (3) schema rejects the old `domains` key.
+it("rejects the legacy domains key", () =>
+  withTempRoot((tempRoot) => {
+    const projectRoot = path.join(tempRoot, "project");
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify({ sources: ["local"], profile: "p", domains: ["node"] }, null, 2)
+    );
+
+    expect(() => runCli(["--root", projectRoot], { cwd: repoRoot })).toThrow(
+      /Invalid ruleset schema .*(must NOT have additional properties|domains)/u
+    );
+  }));
+
+// (4) schema rejects the old `extra` key.
+it("rejects the legacy extra key", () =>
+  withTempRoot((tempRoot) => {
+    const projectRoot = path.join(tempRoot, "project");
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify({ sources: ["local"], profile: "p", extra: ["x.md"] }, null, 2)
+    );
+
+    expect(() => runCli(["--root", projectRoot], { cwd: repoRoot })).toThrow(
+      /Invalid ruleset schema .*(must NOT have additional properties|extra)/u
+    );
+  }));
+
+it("rejects a ruleset with an empty sources array", () =>
+  withTempRoot((tempRoot) => {
+    const projectRoot = path.join(tempRoot, "project");
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify({ sources: [], profile: "p" }, null, 2)
+    );
+
+    expect(() => runCli(["--root", projectRoot], { cwd: repoRoot })).toThrow(
+      /Invalid ruleset schema/u
+    );
+  }));
+
+it("rejects a ruleset missing the profile", () =>
+  withTempRoot((tempRoot) => {
+    const projectRoot = path.join(tempRoot, "project");
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify({ sources: ["local"] }, null, 2)
+    );
+
+    expect(() => runCli(["--root", projectRoot], { cwd: repoRoot })).toThrow(
+      /Invalid ruleset schema/u
+    );
+  }));
+
+it("creates CLAUDE companion by default", () =>
+  withTempRoot((tempRoot) => {
+    const cliEnv = createCliEnv(path.join(tempRoot, "home"));
+    const projectRoot = path.join(tempRoot, "project");
+    const sourceRoot = path.join(tempRoot, "rules-source");
+
+    writeBaseSource(sourceRoot);
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify(
+        { sources: [relSource(projectRoot, sourceRoot)], profile: BASE_PROFILE },
+        null,
+        2
+      )
+    );
+
+    runCli(["--root", projectRoot], { cwd: repoRoot, env: cliEnv });
+
+    expect(fs.existsSync(path.join(projectRoot, "AGENTS.md"))).toBe(true);
+    expect(fs.readFileSync(path.join(projectRoot, "CLAUDE.md"), "utf8")).toBe("@AGENTS.md\n");
+  }));
+
+it("supports disabling CLAUDE companion via ruleset", () =>
+  withTempRoot((tempRoot) => {
+    const cliEnv = createCliEnv(path.join(tempRoot, "home"));
+    const projectRoot = path.join(tempRoot, "project");
+    const sourceRoot = path.join(tempRoot, "rules-source");
+
+    writeBaseSource(sourceRoot);
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify(
+        {
+          sources: [relSource(projectRoot, sourceRoot)],
+          profile: BASE_PROFILE,
+          claude: { enabled: false }
+        },
+        null,
+        2
+      )
+    );
 
     runCli(["--root", projectRoot], { cwd: repoRoot, env: cliEnv });
 
     expect(fs.existsSync(path.join(projectRoot, "AGENTS.md"))).toBe(true);
     expect(fs.existsSync(path.join(projectRoot, "CLAUDE.md"))).toBe(false);
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
+  }));
 
-it("supports custom CLAUDE companion output path", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
-
-  try {
+it("supports custom CLAUDE companion output path", () =>
+  withTempRoot((tempRoot) => {
     const cliEnv = createCliEnv(path.join(tempRoot, "home"));
     const projectRoot = path.join(tempRoot, "project");
     const sourceRoot = path.join(tempRoot, "rules-source");
-    const rulesRoot = path.join(sourceRoot, "rules");
 
+    writeBaseSource(sourceRoot);
     writeFile(
       path.join(projectRoot, "agent-ruleset.json"),
       JSON.stringify(
         {
-          source: path.relative(projectRoot, sourceRoot),
+          sources: [relSource(projectRoot, sourceRoot)],
+          profile: BASE_PROFILE,
           output: "docs/AGENTS.md",
-          claude: {
-            output: "CLAUDE.md"
-          }
+          claude: { output: "CLAUDE.md" }
         },
         null,
         2
       )
     );
-    writeFile(path.join(rulesRoot, "global", "only.md"), "# Only\n1");
 
     runCli(["--root", projectRoot], { cwd: repoRoot, env: cliEnv });
 
     expect(fs.existsSync(path.join(projectRoot, "docs", "AGENTS.md"))).toBe(true);
     expect(fs.readFileSync(path.join(projectRoot, "CLAUDE.md"), "utf8")).toBe("@docs/AGENTS.md\n");
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
+  }));
 
-it("does not duplicate output when output is CLAUDE.md", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
-
-  try {
+it("does not duplicate output when output is CLAUDE.md", () =>
+  withTempRoot((tempRoot) => {
     const cliEnv = createCliEnv(path.join(tempRoot, "home"));
     const projectRoot = path.join(tempRoot, "project");
     const sourceRoot = path.join(tempRoot, "rules-source");
     const rulesRoot = path.join(sourceRoot, "rules");
 
+    writeBaseSource(sourceRoot);
     writeFile(
       path.join(projectRoot, "agent-ruleset.json"),
       JSON.stringify(
         {
-          source: path.relative(projectRoot, sourceRoot),
+          sources: [relSource(projectRoot, sourceRoot)],
+          profile: BASE_PROFILE,
           output: "CLAUDE.md"
         },
         null,
         2
       )
     );
-    writeFile(path.join(rulesRoot, "global", "only.md"), "# Only\n1");
 
     const stdout = runCli(["--json", "--root", projectRoot], { cwd: repoRoot, env: cliEnv });
     const result = JSON.parse(stdout);
@@ -416,74 +822,48 @@ it("does not duplicate output when output is CLAUDE.md", () => {
       dryRun: false,
       budget: buildExpectedBudget([onlyRule])
     });
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
+  }));
 
-it("fails fast when ruleset is missing", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
-
-  try {
+it("fails fast when ruleset is missing", () =>
+  withTempRoot((tempRoot) => {
     expect(() => runCli(["--root", tempRoot], { cwd: repoRoot })).toThrow(
       /Missing ruleset file: .*agent-ruleset\.json/u
     );
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
+  }));
 
-it("does not search for rulesets in subdirectories", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
-
-  try {
+it("does not search for rulesets in subdirectories", () =>
+  withTempRoot((tempRoot) => {
     const nestedRoot = path.join(tempRoot, "nested");
     writeFile(
       path.join(nestedRoot, "agent-ruleset.json"),
-      JSON.stringify(
-        {
-          source: path.relative(nestedRoot, path.join(tempRoot, "rules-source")),
-          output: "AGENTS.md"
-        },
-        null,
-        2
-      )
+      JSON.stringify({ sources: ["local"], profile: "p" }, null, 2)
     );
 
     expect(() => runCli(["--root", tempRoot], { cwd: repoRoot })).toThrow(
       /Missing ruleset file: .*agent-ruleset\.json/u
     );
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
+  }));
 
-it("supports global=false to skip global rules", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
-
-  try {
+it("supports global=false to skip global rules", () =>
+  withTempRoot((tempRoot) => {
     const fakeHome = path.join(tempRoot, "home");
     const cliEnv = createCliEnv(fakeHome);
     const projectRoot = path.join(tempRoot, "project");
     const sourceRoot = path.join(tempRoot, "rules-source");
     const rulesRoot = path.join(sourceRoot, "rules");
 
+    writeProfileManifest(sourceRoot, { p: { domains: ["node"] } });
+    writeFile(path.join(rulesRoot, "global", "only.md"), "# Only Global\n1");
+    writeFile(path.join(rulesRoot, "domains", "node", "domain.md"), "# Domain\nD");
+
     writeFile(
       path.join(projectRoot, "agent-ruleset.json"),
       JSON.stringify(
-        {
-          source: path.relative(projectRoot, sourceRoot),
-          global: false,
-          domains: ["node"],
-          output: "AGENTS.md"
-        },
+        { sources: [relSource(projectRoot, sourceRoot)], profile: "p", global: false },
         null,
         2
       )
     );
-
-    writeFile(path.join(rulesRoot, "global", "only.md"), "# Only Global\n1");
-    writeFile(path.join(rulesRoot, "domains", "node", "domain.md"), "# Domain\nD");
 
     runCli(["--root", projectRoot], { cwd: repoRoot, env: cliEnv });
 
@@ -502,107 +882,64 @@ it("supports global=false to skip global rules", () => {
     )) {
       expect(fs.existsSync(globalPath.replace(/\//g, path.sep))).toBe(false);
     }
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
+  }));
 
-it("supports source path pointing to a rules directory", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
-
-  try {
+it("supports source path pointing to a rules directory", () =>
+  withTempRoot((tempRoot) => {
     const cliEnv = createCliEnv(path.join(tempRoot, "home"));
     const projectRoot = path.join(tempRoot, "project");
-    const rulesRoot = path.join(tempRoot, "rules-root", "rules");
-    const rulesRootRelative = path.relative(projectRoot, rulesRoot);
+    const sourceRoot = path.join(tempRoot, "rules-root");
+    const rulesRoot = path.join(sourceRoot, "rules");
+
+    // Manifest sits at the source root, next to the rules directory the source points at.
+    writeProfileManifest(sourceRoot, { [BASE_PROFILE]: { domains: [] } });
+    writeFile(path.join(rulesRoot, "global", "only.md"), "# Ruleset Root\nruleset");
 
     writeFile(
       path.join(projectRoot, "agent-ruleset.json"),
       JSON.stringify(
         {
-          output: "AGENTS.md",
-          source: rulesRootRelative,
-          global: true
+          sources: [relSource(projectRoot, rulesRoot)],
+          profile: BASE_PROFILE,
+          output: "AGENTS.md"
         },
         null,
         2
       )
     );
 
-    writeFile(path.join(rulesRoot, "global", "only.md"), "# Ruleset Root\nruleset");
-
     runCli(["--root", projectRoot], { cwd: repoRoot, env: cliEnv });
-
     const output = fs.readFileSync(path.join(projectRoot, "AGENTS.md"), "utf8");
     expect(output).toBe(withToolRules(""));
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
+  }));
 
-it("accepts rulesets with comments", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
-
-  try {
+it("accepts rulesets with comments", () =>
+  withTempRoot((tempRoot) => {
     const cliEnv = createCliEnv(path.join(tempRoot, "home"));
     const projectRoot = path.join(tempRoot, "project");
     const sourceRoot = path.join(tempRoot, "rules-source");
-    const rulesRoot = path.join(sourceRoot, "rules");
-    const sourceRelative = path.relative(projectRoot, sourceRoot).replace(/\\/g, "/");
+    const sourceRelative = relSource(projectRoot, sourceRoot);
 
+    writeBaseSource(sourceRoot);
     writeFile(
       path.join(projectRoot, "agent-ruleset.json"),
       `{
-  // rules source
-  "source": "${sourceRelative}",
+  // rules sources
+  "sources": ["${sourceRelative}"],
+  // profile
+  "profile": "${BASE_PROFILE}",
   "output": "AGENTS.md"
 }
 `
     );
 
-    writeFile(path.join(rulesRoot, "global", "only.md"), "# Only\n1");
-
     runCli(["--root", projectRoot], { cwd: repoRoot, env: cliEnv });
-
     const output = fs.readFileSync(path.join(projectRoot, "AGENTS.md"), "utf8");
     expect(output).toBe(withToolRules(""));
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
+  }));
 
-it("rejects invalid ruleset shapes with a clear error", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
-
-  try {
-    const projectRoot = path.join(tempRoot, "project");
-
-    writeFile(
-      path.join(projectRoot, "agent-ruleset.json"),
-      JSON.stringify(
-        {
-          source: "",
-          output: "",
-          domains: ["node", ""],
-          extra: ["valid.md", ""]
-        },
-        null,
-        2
-      )
-    );
-
-    expect(() => runCli(["--root", projectRoot], { cwd: repoRoot })).toThrow(
-      /Invalid ruleset schema .*source|Invalid ruleset schema .*\/output|Invalid ruleset schema .*\/claude\/output/u
-    );
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
-
-it("clears cached rules with --clear-cache", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
-
-  try {
+it("clears cached rules with --clear-cache", () =>
+  withTempRoot((tempRoot) => {
     const fakeHome = path.join(tempRoot, "home");
     const cacheRoot = path.join(fakeHome, ".agentsmd", "cache", "owner", "repo", "ref");
     fs.mkdirSync(cacheRoot, { recursive: true });
@@ -615,32 +952,23 @@ it("clears cached rules with --clear-cache", () => {
 
     expect(stdout).toMatch(/Cache cleared\./u);
     expect(fs.existsSync(path.join(fakeHome, ".agentsmd", "cache"))).toBe(false);
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
+  }));
 
-it("edit-rules uses local source path as workspace", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
-
-  try {
+it("edit-rules uses local source path as workspace", () =>
+  withTempRoot((tempRoot) => {
     const cliEnv = createCliEnv(path.join(tempRoot, "home"));
     const projectRoot = path.join(tempRoot, "project");
     const sourceRoot = path.join(tempRoot, "rules-source");
 
+    writeBaseSource(sourceRoot);
     writeFile(
       path.join(projectRoot, "agent-ruleset.json"),
       JSON.stringify(
-        {
-          source: path.relative(projectRoot, sourceRoot),
-          output: "AGENTS.md"
-        },
+        { sources: [relSource(projectRoot, sourceRoot)], profile: BASE_PROFILE },
         null,
         2
       )
     );
-
-    fs.mkdirSync(path.join(sourceRoot, "rules", "global"), { recursive: true });
 
     const stdout = runCli(["edit-rules", "--root", projectRoot], { cwd: repoRoot, env: cliEnv });
     expect(stdout).toMatch(
@@ -652,69 +980,25 @@ it("edit-rules uses local source path as workspace", () => {
     expect(stdout).toMatch(/Next steps:/u);
     expect(stdout).toMatch(/compose-agentsmd apply-rules/u);
     expect(stdout).toMatch(/regenerate instruction files/u);
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
+  }));
 
-it("edit-rules keeps rules directory when source points directly to rules", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
-
-  try {
-    const cliEnv = createCliEnv(path.join(tempRoot, "home"));
-    const projectRoot = path.join(tempRoot, "project");
-    const sourceRoot = path.join(tempRoot, "rules-source");
-    const rulesRoot = path.join(sourceRoot, "rules");
-
-    writeFile(
-      path.join(projectRoot, "agent-ruleset.json"),
-      JSON.stringify(
-        {
-          source: path.relative(projectRoot, rulesRoot),
-          output: "AGENTS.md"
-        },
-        null,
-        2
-      )
-    );
-
-    fs.mkdirSync(path.join(rulesRoot, "global"), { recursive: true });
-
-    const stdout = runCli(["edit-rules", "--root", projectRoot], { cwd: repoRoot, env: cliEnv });
-    expect(stdout).toMatch(
-      new RegExp(`Rules workspace: ${sourceRoot.replace(/\\/g, "\\\\")}`, "u")
-    );
-    expect(stdout).toMatch(new RegExp(`Rules directory: ${rulesRoot.replace(/\\/g, "\\\\")}`, "u"));
-    expect(stdout).toMatch(/Next steps:/u);
-    expect(stdout).toMatch(/compose-agentsmd apply-rules/u);
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
-
-it("apply-rules composes with refresh for local source", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
-
-  try {
+it("apply-rules composes with refresh for local source", () =>
+  withTempRoot((tempRoot) => {
     const fakeHome = path.join(tempRoot, "home");
     const cliEnv = createCliEnv(fakeHome);
     const projectRoot = path.join(tempRoot, "project");
     const sourceRoot = path.join(tempRoot, "rules-source");
     const rulesRoot = path.join(sourceRoot, "rules");
 
+    writeBaseSource(sourceRoot);
     writeFile(
       path.join(projectRoot, "agent-ruleset.json"),
       JSON.stringify(
-        {
-          source: path.relative(projectRoot, sourceRoot),
-          output: "AGENTS.md"
-        },
+        { sources: [relSource(projectRoot, sourceRoot)], profile: BASE_PROFILE },
         null,
         2
       )
     );
-
-    writeFile(path.join(rulesRoot, "global", "only.md"), "# Only\n1");
 
     runCli(["apply-rules", "--root", projectRoot], { cwd: repoRoot, env: cliEnv });
 
@@ -725,33 +1009,24 @@ it("apply-rules composes with refresh for local source", () => {
         formatRuleBlock(path.join(rulesRoot, "global", "only.md"), "# Only\n1", projectRoot) + "\n"
       )
     );
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
+  }));
 
-it("apply-rules supports --json output", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
-
-  try {
+it("apply-rules supports --json output", () =>
+  withTempRoot((tempRoot) => {
     const cliEnv = createCliEnv(path.join(tempRoot, "home"));
     const projectRoot = path.join(tempRoot, "project");
     const sourceRoot = path.join(tempRoot, "rules-source");
     const rulesRoot = path.join(sourceRoot, "rules");
 
+    writeBaseSource(sourceRoot);
     writeFile(
       path.join(projectRoot, "agent-ruleset.json"),
       JSON.stringify(
-        {
-          source: path.relative(projectRoot, sourceRoot),
-          output: "AGENTS.md"
-        },
+        { sources: [relSource(projectRoot, sourceRoot)], profile: BASE_PROFILE },
         null,
         2
       )
     );
-
-    writeFile(path.join(rulesRoot, "global", "only.md"), "# Only\n1");
 
     const stdout = runCli(["apply-rules", "--json", "--root", projectRoot], {
       cwd: repoRoot,
@@ -771,36 +1046,26 @@ it("apply-rules supports --json output", () => {
       budget: buildExpectedBudget([onlyRule])
     });
 
-    const output = fs.readFileSync(path.join(projectRoot, "AGENTS.md"), "utf8");
-    expect(output).toBe(withToolRules(""));
+    expect(fs.readFileSync(path.join(projectRoot, "AGENTS.md"), "utf8")).toBe(withToolRules(""));
     expect(fs.readFileSync(path.join(projectRoot, "CLAUDE.md"), "utf8")).toBe("@AGENTS.md\n");
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
+  }));
 
-it("apply-rules respects --dry-run with --json", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
-
-  try {
+it("apply-rules respects --dry-run with --json", () =>
+  withTempRoot((tempRoot) => {
     const cliEnv = createCliEnv(path.join(tempRoot, "home"));
     const projectRoot = path.join(tempRoot, "project");
     const sourceRoot = path.join(tempRoot, "rules-source");
     const rulesRoot = path.join(sourceRoot, "rules");
 
+    writeBaseSource(sourceRoot);
     writeFile(
       path.join(projectRoot, "agent-ruleset.json"),
       JSON.stringify(
-        {
-          source: path.relative(projectRoot, sourceRoot),
-          output: "AGENTS.md"
-        },
+        { sources: [relSource(projectRoot, sourceRoot)], profile: BASE_PROFILE },
         null,
         2
       )
     );
-
-    writeFile(path.join(rulesRoot, "global", "only.md"), "# Only\n1");
 
     const stdout = runCli(["apply-rules", "--dry-run", "--json", "--root", projectRoot], {
       cwd: repoRoot,
@@ -823,83 +1088,83 @@ it("apply-rules respects --dry-run with --json", () => {
     });
     expect(fs.existsSync(path.join(projectRoot, "AGENTS.md"))).toBe(false);
     expect(fs.existsSync(path.join(projectRoot, "CLAUDE.md"))).toBe(false);
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
+  }));
 
-it("init creates a default ruleset with comments", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
-
-  try {
+// (16) init creates a new-format ruleset.
+it("init creates a default ruleset with comments", () =>
+  withTempRoot((tempRoot) => {
     const projectRoot = path.join(tempRoot, "project");
 
     const stdout = runCli(["init", "--yes", "--root", projectRoot], { cwd: repoRoot });
     expect(stdout).toMatch(/Initialized ruleset:/u);
 
-    const rulesetPath = path.join(projectRoot, "agent-ruleset.json");
-    const rulesetRaw = fs.readFileSync(rulesetPath, "utf8");
-    expect(rulesetRaw).toMatch(/\/\/ Rules source/u);
+    const rulesetRaw = fs.readFileSync(path.join(projectRoot, "agent-ruleset.json"), "utf8");
+    expect(rulesetRaw).toMatch(/\/\/ Rules sources/u);
     expect(/("global"\s*:)/u.test(rulesetRaw)).toBe(false);
-    const ruleset = JSON.parse(stripJsonComments(rulesetRaw));
+    expect(rulesetRaw).not.toMatch(/"domains"/u);
+    expect(rulesetRaw).not.toMatch(/"extra"/u);
+    expect(rulesetRaw).not.toMatch(/"source"\s*:/u);
 
+    const ruleset = JSON.parse(stripJsonComments(rulesetRaw));
     expect(ruleset).toEqual({
-      source: "github:owner/repo@latest",
-      domains: [],
-      extra: [],
+      sources: ["github:owner/repo"],
+      profile: "node-cli",
       output: "AGENTS.md",
-      claude: {
-        enabled: true,
-        output: "CLAUDE.md"
-      }
+      claude: { enabled: true, output: "CLAUDE.md" }
     });
 
-    const localRulesPath = path.join(projectRoot, "agent-rules-local", "custom.md");
-    expect(fs.existsSync(localRulesPath)).toBe(false);
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
+    expect(fs.existsSync(path.join(projectRoot, "agent-rules-local", "custom.md"))).toBe(false);
+  }));
 
-it("supports --quiet and -q to suppress output", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
+it("init accepts a custom profile", () =>
+  withTempRoot((tempRoot) => {
+    const projectRoot = path.join(tempRoot, "project");
 
-  try {
+    runCli(["init", "--yes", "--profile", "course-docs", "--root", projectRoot], { cwd: repoRoot });
+
+    const ruleset = JSON.parse(
+      stripJsonComments(fs.readFileSync(path.join(projectRoot, "agent-ruleset.json"), "utf8"))
+    );
+    expect(ruleset.profile).toBe("course-docs");
+    expect(ruleset.sources).toEqual(["github:owner/repo"]);
+  }));
+
+it("supports --quiet and -q to suppress output", () =>
+  withTempRoot((tempRoot) => {
+    const cliEnv = createCliEnv(path.join(tempRoot, "home"));
+    const projectRoot = path.join(tempRoot, "project");
+    const sourceRoot = path.join(tempRoot, "rules-source");
+
+    writeBaseSource(sourceRoot);
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify(
+        { sources: [relSource(projectRoot, sourceRoot)], profile: BASE_PROFILE },
+        null,
+        2
+      )
+    );
+
+    expect(runCli(["--quiet", "--root", projectRoot], { cwd: repoRoot, env: cliEnv })).toBe("");
+    expect(runCli(["-q", "--root", projectRoot], { cwd: repoRoot, env: cliEnv })).toBe("");
+  }));
+
+it("supports --json for machine-readable output", () =>
+  withTempRoot((tempRoot) => {
     const cliEnv = createCliEnv(path.join(tempRoot, "home"));
     const projectRoot = path.join(tempRoot, "project");
     const sourceRoot = path.join(tempRoot, "rules-source");
     const rulesRoot = path.join(sourceRoot, "rules");
 
+    writeBaseSource(sourceRoot);
     writeFile(
       path.join(projectRoot, "agent-ruleset.json"),
-      JSON.stringify({ source: path.relative(projectRoot, sourceRoot) }, null, 2)
+      JSON.stringify(
+        { sources: [relSource(projectRoot, sourceRoot)], profile: BASE_PROFILE },
+        null,
+        2
+      )
     );
-    writeFile(path.join(rulesRoot, "global", "only.md"), "# Only\n1");
-
-    const stdoutLong = runCli(["--quiet", "--root", projectRoot], { cwd: repoRoot, env: cliEnv });
-    expect(stdoutLong).toBe("");
-
-    const stdoutShort = runCli(["-q", "--root", projectRoot], { cwd: repoRoot, env: cliEnv });
-    expect(stdoutShort).toBe("");
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
-
-it("supports --json for machine-readable output", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
-
-  try {
-    const cliEnv = createCliEnv(path.join(tempRoot, "home"));
-    const projectRoot = path.join(tempRoot, "project");
-    const sourceRoot = path.join(tempRoot, "rules-source");
-    const rulesRoot = path.join(sourceRoot, "rules");
-
-    writeFile(
-      path.join(projectRoot, "agent-ruleset.json"),
-      JSON.stringify({ source: path.relative(projectRoot, sourceRoot) }, null, 2)
-    );
-    writeFile(path.join(rulesRoot, "global", "only.md"), "# Only\n1");
 
     const stdout = runCli(["--json", "--root", projectRoot], { cwd: repoRoot, env: cliEnv });
     const result = JSON.parse(stdout);
@@ -915,55 +1180,49 @@ it("supports --json for machine-readable output", () => {
       dryRun: false,
       budget: buildExpectedBudget([onlyRule])
     });
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
+  }));
 
-it("supports --dry-run for compose", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
-
-  try {
+it("supports --dry-run for compose", () =>
+  withTempRoot((tempRoot) => {
     const cliEnv = createCliEnv(path.join(tempRoot, "home"));
     const projectRoot = path.join(tempRoot, "project");
     const sourceRoot = path.join(tempRoot, "rules-source");
-    const rulesRoot = path.join(sourceRoot, "rules");
 
+    writeBaseSource(sourceRoot);
     writeFile(
       path.join(projectRoot, "agent-ruleset.json"),
-      JSON.stringify({ source: path.relative(projectRoot, sourceRoot) }, null, 2)
+      JSON.stringify(
+        { sources: [relSource(projectRoot, sourceRoot)], profile: BASE_PROFILE },
+        null,
+        2
+      )
     );
-    writeFile(path.join(rulesRoot, "global", "only.md"), "# Only\n1");
 
     const stdout = runCli(["--dry-run", "--root", projectRoot], { cwd: repoRoot, env: cliEnv });
     expect(stdout).toMatch(/Composed instruction files:/u);
     expect(fs.existsSync(path.join(projectRoot, "AGENTS.md"))).toBe(false);
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
+  }));
 
-it("prints repository and global diffs when outputs change", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
-
-  try {
+it("prints repository and global diffs when outputs change", () =>
+  withTempRoot((tempRoot) => {
     const fakeHome = path.join(tempRoot, "home");
     const cliEnv = createCliEnv(fakeHome);
     const projectRoot = path.join(tempRoot, "project");
     const sourceRoot = path.join(tempRoot, "rules-source");
-    const rulesRoot = path.join(sourceRoot, "rules");
 
+    writeBaseSource(sourceRoot);
     writeFile(
       path.join(projectRoot, "agent-ruleset.json"),
-      JSON.stringify({ source: path.relative(projectRoot, sourceRoot) }, null, 2)
+      JSON.stringify(
+        { sources: [relSource(projectRoot, sourceRoot)], profile: BASE_PROFILE },
+        null,
+        2
+      )
     );
-    writeFile(path.join(rulesRoot, "global", "only.md"), "# Only\n1");
-
     writeFile(path.join(projectRoot, "AGENTS.md"), "old\n");
     writeFile(path.join(fakeHome, ".codex", "AGENTS.md"), "old-global\n");
 
     const stdout = runCli(["--root", projectRoot], { cwd: repoRoot, env: cliEnv });
-    expect(stdout).toMatch(/Composed instruction files:/u);
     expect(stdout).toMatch(/Repository outputs updated/u);
     expect(stdout).toMatch(/Global outputs updated/u);
     expect(stdout).toMatch(/--- BEGIN REPOSITORY DIFF ---/u);
@@ -972,197 +1231,303 @@ it("prints repository and global diffs when outputs change", () => {
     expect(stdout).toMatch(/--- BEGIN GLOBAL DIFF ---/u);
     expect(stdout).toMatch(/--- a\/~\/\.codex\/AGENTS\.md/u);
     expect(stdout).toMatch(/\+\+\+ b\/~\/\.codex\/AGENTS\.md/u);
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
+  }));
 
-it("prints unchanged for repository and global outputs when nothing changed", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
-
-  try {
+it("prints unchanged for repository and global outputs when nothing changed", () =>
+  withTempRoot((tempRoot) => {
     const cliEnv = createCliEnv(path.join(tempRoot, "home"));
     const projectRoot = path.join(tempRoot, "project");
     const sourceRoot = path.join(tempRoot, "rules-source");
-    const rulesRoot = path.join(sourceRoot, "rules");
 
+    writeBaseSource(sourceRoot);
     writeFile(
       path.join(projectRoot, "agent-ruleset.json"),
-      JSON.stringify({ source: path.relative(projectRoot, sourceRoot) }, null, 2)
+      JSON.stringify(
+        { sources: [relSource(projectRoot, sourceRoot)], profile: BASE_PROFILE },
+        null,
+        2
+      )
     );
-    writeFile(path.join(rulesRoot, "global", "only.md"), "# Only\n1");
 
     runCli(["--root", projectRoot], { cwd: repoRoot, env: cliEnv });
     const stdout = runCli(["--root", projectRoot], { cwd: repoRoot, env: cliEnv });
 
-    expect(stdout).toMatch(/Composed instruction files:/u);
     expect(stdout).toMatch(/Repository outputs unchanged/u);
     expect(stdout).toMatch(/Global outputs unchanged/u);
     expect(stdout).not.toMatch(/BEGIN DIFF/u);
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
+  }));
 
-it("init --dry-run does not write files", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
-
-  try {
+// (13) check exits 0 when outputs are current.
+it("check exits 0 when repository outputs are current", () =>
+  withTempRoot((tempRoot) => {
+    const cliEnv = createCliEnv(path.join(tempRoot, "home"));
     const projectRoot = path.join(tempRoot, "project");
+    const sourceRoot = path.join(tempRoot, "rules-source");
 
+    writeBaseSource(sourceRoot);
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify(
+        { sources: [relSource(projectRoot, sourceRoot)], profile: BASE_PROFILE },
+        null,
+        2
+      )
+    );
+
+    runCli(["--root", projectRoot], { cwd: repoRoot, env: cliEnv });
+    const { status, stdout } = runCliStatus(["check", "--root", projectRoot], {
+      cwd: repoRoot,
+      env: cliEnv
+    });
+    expect(status).toBe(0);
+    expect(stdout).toMatch(/Repository outputs are up to date/u);
+  }));
+
+it("check does not inspect global output files", () =>
+  withTempRoot((tempRoot) => {
+    const fakeHome = path.join(tempRoot, "home");
+    const cliEnv = createCliEnv(fakeHome);
+    const projectRoot = path.join(tempRoot, "project");
+    const sourceRoot = path.join(tempRoot, "rules-source");
+
+    writeBaseSource(sourceRoot);
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify(
+        { sources: [relSource(projectRoot, sourceRoot)], profile: BASE_PROFILE },
+        null,
+        2
+      )
+    );
+
+    runCli(["--root", projectRoot], { cwd: repoRoot, env: cliEnv });
+    const codexGlobalOutput = path.join(fakeHome, ".codex", "AGENTS.md");
+    fs.rmSync(codexGlobalOutput, { force: true });
+    fs.mkdirSync(codexGlobalOutput, { recursive: true });
+
+    const { status, stdout, stderr } = runCliStatus(["check", "--root", projectRoot], {
+      cwd: repoRoot,
+      env: cliEnv
+    });
+    expect(status).toBe(0);
+    expect(stderr).toBe("");
+    expect(stdout).toMatch(/Repository outputs are up to date/u);
+  }));
+
+// (14) check exits 1 when AGENTS.md is stale.
+it("check exits 1 when AGENTS.md is stale", () =>
+  withTempRoot((tempRoot) => {
+    const cliEnv = createCliEnv(path.join(tempRoot, "home"));
+    const projectRoot = path.join(tempRoot, "project");
+    const sourceRoot = path.join(tempRoot, "rules-source");
+
+    writeBaseSource(sourceRoot);
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify(
+        { sources: [relSource(projectRoot, sourceRoot)], profile: BASE_PROFILE },
+        null,
+        2
+      )
+    );
+
+    runCli(["--root", projectRoot], { cwd: repoRoot, env: cliEnv });
+    writeFile(path.join(projectRoot, "AGENTS.md"), "stale content\n");
+
+    const { status, stdout } = runCliStatus(["check", "--root", projectRoot], {
+      cwd: repoRoot,
+      env: cliEnv
+    });
+    expect(status).toBe(1);
+    expect(stdout).toMatch(/Stale repository outputs/u);
+    expect(stdout).toMatch(/- AGENTS\.md/u);
+  }));
+
+// (15) check writes no files.
+it("check writes no files", () =>
+  withTempRoot((tempRoot) => {
+    const cliEnv = createCliEnv(path.join(tempRoot, "home"));
+    const projectRoot = path.join(tempRoot, "project");
+    const sourceRoot = path.join(tempRoot, "rules-source");
+
+    writeBaseSource(sourceRoot);
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify(
+        { sources: [relSource(projectRoot, sourceRoot)], profile: BASE_PROFILE },
+        null,
+        2
+      )
+    );
+
+    const { status } = runCliStatus(["check", "--root", projectRoot], {
+      cwd: repoRoot,
+      env: cliEnv
+    });
+    expect(status).toBe(1);
+    expect(fs.existsSync(path.join(projectRoot, "AGENTS.md"))).toBe(false);
+    expect(fs.existsSync(path.join(projectRoot, "CLAUDE.md"))).toBe(false);
+  }));
+
+it("check supports --json output", () =>
+  withTempRoot((tempRoot) => {
+    const cliEnv = createCliEnv(path.join(tempRoot, "home"));
+    const projectRoot = path.join(tempRoot, "project");
+    const sourceRoot = path.join(tempRoot, "rules-source");
+
+    writeBaseSource(sourceRoot);
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify(
+        { sources: [relSource(projectRoot, sourceRoot)], profile: BASE_PROFILE },
+        null,
+        2
+      )
+    );
+
+    runCli(["--root", projectRoot], { cwd: repoRoot, env: cliEnv });
+    const { status, stdout } = runCliStatus(["check", "--json", "--root", projectRoot], {
+      cwd: repoRoot,
+      env: cliEnv
+    });
+    expect(status).toBe(0);
+    const result = JSON.parse(stdout);
+    expect(result).toEqual({
+      check: true,
+      upToDate: true,
+      repositoryOutputs: DEFAULT_REPOSITORY_OUTPUTS,
+      stale: []
+    });
+  }));
+
+it("init --dry-run does not write files", () =>
+  withTempRoot((tempRoot) => {
+    const projectRoot = path.join(tempRoot, "project");
     const stdout = runCli(["init", "--dry-run", "--root", projectRoot], { cwd: repoRoot });
     expect(stdout).toMatch(/Dry run/u);
     expect(fs.existsSync(path.join(projectRoot, "agent-ruleset.json"))).toBe(false);
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
+  }));
 
-it("init refuses to overwrite an existing ruleset without --force", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
-
-  try {
+it("init refuses to overwrite an existing ruleset without --force", () =>
+  withTempRoot((tempRoot) => {
     const projectRoot = path.join(tempRoot, "project");
     writeFile(
       path.join(projectRoot, "agent-ruleset.json"),
-      JSON.stringify({ source: "local" }, null, 2)
+      JSON.stringify({ sources: ["local"], profile: "p" }, null, 2)
     );
 
     expect(() => runCli(["init", "--yes", "--root", projectRoot], { cwd: repoRoot })).toThrow(
       /Ruleset already exists/u
     );
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
+  }));
 
-it("init respects --quiet and --json", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
-
-  try {
+it("init respects --quiet and --json", () =>
+  withTempRoot((tempRoot) => {
     const projectRoot = path.join(tempRoot, "project");
 
-    // Case 1: --quiet suppresses standard output
     const stdoutQuiet = runCli(["init", "--yes", "--quiet", "--root", projectRoot], {
       cwd: repoRoot
     });
     expect(stdoutQuiet).toBe("");
     expect(fs.existsSync(path.join(projectRoot, "agent-ruleset.json"))).toBe(true);
 
-    // Clean up for next case
     fs.rmSync(projectRoot, { recursive: true, force: true });
 
-    // Case 2: --json outputs JSON and suppresses standard output
     const stdoutJson = runCli(["init", "--yes", "--json", "--root", projectRoot], {
       cwd: repoRoot
     });
     const result = JSON.parse(stdoutJson);
-
     expect(result.dryRun).toBe(false);
     expect(result.initialized).toEqual(["agent-ruleset.json"]);
-    expect(result.localRules).toEqual([]);
     expect(result.composed).toEqual([]);
-    expect(fs.existsSync(path.join(projectRoot, "agent-ruleset.json"))).toBe(true);
-
-    // Check that there is no other output mixed with JSON
+    expect(result.localRules).toBeUndefined();
     expect(stdoutJson).not.toMatch(/Initialized ruleset:/u);
+  }));
 
-    // Clean up for next case
-    fs.rmSync(projectRoot, { recursive: true, force: true });
-
-    // Case 3: --json takes precedence over --quiet
-    const stdoutJsonQuiet = runCli(["init", "--yes", "--quiet", "--json", "--root", projectRoot], {
-      cwd: repoRoot
-    });
-    const resultJsonQuiet = JSON.parse(stdoutJsonQuiet);
-
-    expect(resultJsonQuiet.dryRun).toBe(false);
-    expect(resultJsonQuiet.initialized).toEqual(["agent-ruleset.json"]);
-    expect(resultJsonQuiet.localRules).toEqual([]);
-    expect(resultJsonQuiet.composed).toEqual([]);
-    expect(fs.existsSync(path.join(projectRoot, "agent-ruleset.json"))).toBe(true);
-    expect(stdoutJsonQuiet).not.toMatch(/Initialized ruleset:/u);
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
-
-it("compose respects --dry-run with --json", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
-
-  try {
+it("compose respects --dry-run with --json", () =>
+  withTempRoot((tempRoot) => {
     const cliEnv = createCliEnv(path.join(tempRoot, "home"));
     const projectRoot = path.join(tempRoot, "project");
     const sourceRoot = path.join(tempRoot, "rules-source");
 
+    writeBaseSource(sourceRoot, { global: null });
+    // Global directory is optional; ensure the rules root exists for local resolution.
+    fs.mkdirSync(path.join(sourceRoot, "rules"), { recursive: true });
     writeFile(
       path.join(projectRoot, "agent-ruleset.json"),
-      JSON.stringify({ source: path.relative(projectRoot, sourceRoot) }, null, 2)
+      JSON.stringify(
+        { sources: [relSource(projectRoot, sourceRoot)], profile: BASE_PROFILE },
+        null,
+        2
+      )
     );
-    fs.mkdirSync(path.join(sourceRoot, "rules", "global"), { recursive: true });
 
     const stdout = runCli(["--dry-run", "--json", "--root", projectRoot], {
       cwd: repoRoot,
       env: cliEnv
     });
     const result = JSON.parse(stdout);
-
     expect(result.dryRun).toBe(true);
     expect(result.composed).toEqual(DEFAULT_COMPOSED_OUTPUTS);
     expect(result.repositoryOutputs).toEqual(DEFAULT_REPOSITORY_OUTPUTS);
     expect(result.globalOutputs).toEqual(DEFAULT_GLOBAL_OUTPUTS);
     expect(fs.existsSync(path.join(projectRoot, "AGENTS.md"))).toBe(false);
     expect(fs.existsSync(path.join(projectRoot, "CLAUDE.md"))).toBe(false);
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
+  }));
 
-it("init --dry-run with --json outputs plan", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
-
-  try {
+it("init --dry-run with --json outputs plan", () =>
+  withTempRoot((tempRoot) => {
     const projectRoot = path.join(tempRoot, "project");
-
     const stdout = runCli(["init", "--dry-run", "--json", "--root", projectRoot], {
       cwd: repoRoot
     });
     const result = JSON.parse(stdout);
-
     expect(result.dryRun).toBe(true);
-    expect(Array.isArray(result.plan)).toBe(true);
     expect(result.plan).toEqual([{ action: "create", path: "agent-ruleset.json" }]);
     expect(fs.existsSync(path.join(projectRoot, "agent-ruleset.json"))).toBe(false);
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
+  }));
+
+// (17) CLI help and README no longer recommend domains or extra.
+it("help and README no longer expose legacy source/domains/extra options", () => {
+  const help = runCli(["--help"], { cwd: repoRoot });
+  expect(help).not.toMatch(/--domains/u);
+  expect(help).not.toMatch(/--extra/u);
+  expect(help).not.toMatch(/--source\b/u);
+  expect(help).toMatch(/--profile/u);
+  expect(help).toMatch(/\bcheck\b/u);
+
+  const readme = fs.readFileSync(path.join(repoRoot, "README.md"), "utf8");
+  expect(readme).not.toMatch(/--domains/u);
+  expect(readme).not.toMatch(/--extra/u);
+  expect(readme).not.toMatch(/"extra"/u);
+  expect(readme).not.toMatch(/^\s*"source":/mu);
+  expect(readme).toMatch(/"sources"/u);
+  expect(readme).toMatch(/"profile"/u);
 });
 
-it("budget: no warning when within limits", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
-
-  try {
+it("budget: no warning when within limits", () =>
+  withTempRoot((tempRoot) => {
     const projectRoot = path.join(tempRoot, "project");
     const sourceRoot = path.join(tempRoot, "rules-source");
     const rulesRoot = path.join(sourceRoot, "rules");
 
+    writeProfileManifest(sourceRoot, { [BASE_PROFILE]: { domains: [] } });
+    writeFile(path.join(rulesRoot, "global", "small.md"), "# Small\nA\nB\nC");
     writeFile(
       path.join(projectRoot, "agent-ruleset.json"),
-      JSON.stringify({ source: path.relative(projectRoot, sourceRoot) }, null, 2)
+      JSON.stringify(
+        { sources: [relSource(projectRoot, sourceRoot)], profile: BASE_PROFILE },
+        null,
+        2
+      )
     );
-    writeFile(path.join(rulesRoot, "global", "small.md"), "# Small\nA\nB\nC");
 
     const { stderr } = runCliResult(["--root", projectRoot], { cwd: repoRoot });
     expect(stderr).toBe("");
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
+  }));
 
-it("budget: emits per-module review advisory to stderr when a module exceeds advisory threshold", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
-
-  try {
+it("budget: emits per-module review advisory to stderr when a module exceeds advisory threshold", () =>
+  withTempRoot((tempRoot) => {
     const projectRoot = path.join(tempRoot, "project");
     const sourceRoot = path.join(tempRoot, "rules-source");
     const rulesRoot = path.join(sourceRoot, "rules");
@@ -1175,18 +1540,20 @@ it("budget: emits per-module review advisory to stderr when a module exceeds adv
     const moduleTokens = countBudgetTokens(moduleSection);
     const moduleBudget = moduleTokens - 1;
 
+    writeProfileManifest(sourceRoot, { [BASE_PROFILE]: { domains: [] } });
+    writeFile(path.join(rulesRoot, "global", "big-module.md"), bigContent);
     writeFile(
       path.join(projectRoot, "agent-ruleset.json"),
       JSON.stringify(
         {
-          source: path.relative(projectRoot, sourceRoot),
+          sources: [relSource(projectRoot, sourceRoot)],
+          profile: BASE_PROFILE,
           budget: { totalTokens: moduleTokens + 500, moduleTokens: moduleBudget }
         },
         null,
         2
       )
     );
-    writeFile(path.join(rulesRoot, "global", "big-module.md"), bigContent);
 
     const { stderr } = runCliResult(["--root", projectRoot], { cwd: repoRoot });
     expect(stderr).not.toMatch(/⚠ Global rules budget exceeded/u);
@@ -1198,15 +1565,10 @@ it("budget: emits per-module review advisory to stderr when a module exceeds adv
     );
     expect(stderr).toMatch(new RegExp(`big-module\\.md: ${moduleTokens} tokens`, "u"));
     expect(stderr).toMatch(/Review whether listed modules contain procedural content/u);
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
+  }));
 
-it("budget: warns to stderr when total tokens exceed total limit", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
-
-  try {
+it("budget: warns to stderr when total tokens exceed total limit", () =>
+  withTempRoot((tempRoot) => {
     const projectRoot = path.join(tempRoot, "project");
     const sourceRoot = path.join(tempRoot, "rules-source");
     const rulesRoot = path.join(sourceRoot, "rules");
@@ -1218,20 +1580,22 @@ it("budget: warns to stderr when total tokens exceed total limit", () => {
     const totalTokens = countBudgetTokens(buildGlobalOutput(globalBlocks));
     const totalBudget = totalTokens - 1;
 
+    writeProfileManifest(sourceRoot, { [BASE_PROFILE]: { domains: [] } });
+    writeFile(path.join(rulesRoot, "global", "a.md"), "# A\nline1\nline2");
+    writeFile(path.join(rulesRoot, "global", "b.md"), "# B\nline1\nline2");
+    writeFile(path.join(rulesRoot, "global", "c.md"), "# C\nline1\nline2");
     writeFile(
       path.join(projectRoot, "agent-ruleset.json"),
       JSON.stringify(
         {
-          source: path.relative(projectRoot, sourceRoot),
+          sources: [relSource(projectRoot, sourceRoot)],
+          profile: BASE_PROFILE,
           budget: { totalTokens: totalBudget, moduleTokens: DEFAULT_MODULE_BUDGET * 4 }
         },
         null,
         2
       )
     );
-    writeFile(path.join(rulesRoot, "global", "a.md"), "# A\nline1\nline2");
-    writeFile(path.join(rulesRoot, "global", "b.md"), "# B\nline1\nline2");
-    writeFile(path.join(rulesRoot, "global", "c.md"), "# C\nline1\nline2");
 
     const { stderr } = runCliResult(["--root", projectRoot], { cwd: repoRoot });
     expect(stderr).toMatch(
@@ -1240,15 +1604,10 @@ it("budget: warns to stderr when total tokens exceed total limit", () => {
         "u"
       )
     );
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
+  }));
 
-it("budget: warning is suppressed with --quiet", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
-
-  try {
+it("budget: warning is suppressed with --quiet", () =>
+  withTempRoot((tempRoot) => {
     const projectRoot = path.join(tempRoot, "project");
     const sourceRoot = path.join(tempRoot, "rules-source");
     const rulesRoot = path.join(sourceRoot, "rules");
@@ -1260,30 +1619,27 @@ it("budget: warning is suppressed with --quiet", () => {
     );
     const moduleTokens = countBudgetTokens(moduleSection);
 
+    writeProfileManifest(sourceRoot, { [BASE_PROFILE]: { domains: [] } });
+    writeFile(path.join(rulesRoot, "global", "big-module.md"), bigContent);
     writeFile(
       path.join(projectRoot, "agent-ruleset.json"),
       JSON.stringify(
         {
-          source: path.relative(projectRoot, sourceRoot),
+          sources: [relSource(projectRoot, sourceRoot)],
+          profile: BASE_PROFILE,
           budget: { totalTokens: moduleTokens + 500, moduleTokens: moduleTokens - 1 }
         },
         null,
         2
       )
     );
-    writeFile(path.join(rulesRoot, "global", "big-module.md"), bigContent);
 
     const { stderr } = runCliResult(["--quiet", "--root", projectRoot], { cwd: repoRoot });
     expect(stderr).toBe("");
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
+  }));
 
-it("budget: json output includes budget data when module advisory triggers", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
-
-  try {
+it("budget: json output includes budget data when module advisory triggers", () =>
+  withTempRoot((tempRoot) => {
     const projectRoot = path.join(tempRoot, "project");
     const sourceRoot = path.join(tempRoot, "rules-source");
     const rulesRoot = path.join(sourceRoot, "rules");
@@ -1294,18 +1650,20 @@ it("budget: json output includes budget data when module advisory triggers", () 
     );
     const moduleTokens = countBudgetTokens(overRule);
 
+    writeProfileManifest(sourceRoot, { [BASE_PROFILE]: { domains: [] } });
+    writeFile(path.join(rulesRoot, "global", "over.md"), "# Over\nA\nB\nC");
     writeFile(
       path.join(projectRoot, "agent-ruleset.json"),
       JSON.stringify(
         {
-          source: path.relative(projectRoot, sourceRoot),
+          sources: [relSource(projectRoot, sourceRoot)],
+          profile: BASE_PROFILE,
           budget: { totalTokens: moduleTokens + 500, moduleTokens: moduleTokens - 1 }
         },
         null,
         2
       )
     );
-    writeFile(path.join(rulesRoot, "global", "over.md"), "# Over\nA\nB\nC");
 
     const stdout = runCli(["--json", "--root", projectRoot], { cwd: repoRoot });
     const result = JSON.parse(stdout);
@@ -1315,15 +1673,10 @@ it("budget: json output includes budget data when module advisory triggers", () 
     expect(result.budget.overBudgetModules).toHaveLength(1);
     expect(result.budget.overBudgetModules[0].name).toBe("over.md");
     expect(result.budget.overBudgetModules[0].tokens).toBe(moduleTokens);
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
+  }));
 
-it("budget: apply-rules emits per-module review advisory on module advisory trigger", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "compose-agentsmd-"));
-
-  try {
+it("budget: apply-rules emits per-module review advisory on module advisory trigger", () =>
+  withTempRoot((tempRoot) => {
     const projectRoot = path.join(tempRoot, "project");
     const sourceRoot = path.join(tempRoot, "rules-source");
     const rulesRoot = path.join(sourceRoot, "rules");
@@ -1334,24 +1687,23 @@ it("budget: apply-rules emits per-module review advisory on module advisory trig
     );
     const moduleTokens = countBudgetTokens(ruleSection);
 
+    writeProfileManifest(sourceRoot, { [BASE_PROFILE]: { domains: [] } });
+    writeFile(path.join(rulesRoot, "global", "rule.md"), "# Rule\nA\nB");
     writeFile(
       path.join(projectRoot, "agent-ruleset.json"),
       JSON.stringify(
         {
-          source: path.relative(projectRoot, sourceRoot),
+          sources: [relSource(projectRoot, sourceRoot)],
+          profile: BASE_PROFILE,
           budget: { totalTokens: moduleTokens + 500, moduleTokens: moduleTokens - 1 }
         },
         null,
         2
       )
     );
-    writeFile(path.join(rulesRoot, "global", "rule.md"), "# Rule\nA\nB");
 
     const { stderr } = runCliResult(["apply-rules", "--root", projectRoot], { cwd: repoRoot });
     expect(stderr).not.toMatch(/⚠ Global rules budget exceeded/u);
     expect(stderr).toMatch(/ℹ Modules over per-module review threshold/u);
     expect(stderr).toMatch(new RegExp(`rule\\.md: ${moduleTokens} tokens`, "u"));
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
-});
+  }));
