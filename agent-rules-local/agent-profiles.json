@@ -1,7 +1,0 @@
-{
-  "profiles": {
-    "compose-agentsmd": {
-      "domains": ["compose-agentsmd"]
-    }
-  }
-}

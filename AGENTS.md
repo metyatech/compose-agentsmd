@@ -12,8 +12,45 @@
 - Before applying any rule updates, present the planned changes first with an ANSI-colored diff-style preview, ask for explicit approval, then make the edits.
 - These tool rules live in tools/tool-rules.md in the compose-agentsmd repository; do not duplicate them in other rule modules.
 
-Source: agent-rules-local/rules/domains/compose-agentsmd/compose-agentsmd-local.md
+Source: github:metyatech/agent-rules@HEAD/rules/domains/node/module-system.md
 
-# Compose-Agentsmd Local Overrides
+# Node module system (ESM)
 
-- For this repository only, generate AGENTS.md using `npm run compose` (do not run `compose-agentsmd` directly).
+- Default to TypeScript (.ts/.tsx); use JavaScript only for tool-required config
+  files.
+- Always set "type": "module" in package.json.
+- Prefer ESM with .js extensions for JavaScript config/scripts (e.g.,
+  next.config.js as ESM).
+
+Source: github:metyatech/agent-rules@HEAD/rules/domains/node/npm-packages.md
+
+# Node package publishing
+
+- For scoped npm packages, set publishConfig.access = "public".
+- Set files to constrain the published contents.
+- If a clean npm install is insufficient, use prepare (or equivalent) to build.
+
+## Verification
+
+- Use npm pack --dry-run to inspect the package contents.
+- Run npm test when tests exist.
+
+Source: github:metyatech/agent-rules@HEAD/rules/domains/agent-tooling/composition.md
+
+# Agent Tooling Composition
+
+- Agent tooling repositories MUST keep generated instruction files reproducible from `agent-ruleset.json` and the selected profile.
+- Agent tooling repositories MUST NOT rely on repo-local `agent-rules-local` rule files.
+- Rule source changes MUST be made in `rules/global/`, `rules/domains/`, or `agent-profiles.json`.
+- Generated `AGENTS.md` and `CLAUDE.md` diffs MUST be reviewed as generated instruction diffs, not hand-edited.
+- If a generated instruction file is stale, regenerate it with `compose-agentsmd` or the repository's canonical compose command before reporting completion.
+- A profile MUST select the complete set of domains needed by a repository type; consuming repositories MUST NOT compensate by listing domains or local extras.
+
+Source: github:metyatech/agent-rules@HEAD/rules/domains/compose-agentsmd/self-composition.md
+
+# Compose-Agentsmd Self Composition
+
+- For the `compose-agentsmd` repository only, generate instruction files using `npm run compose`.
+- Do not run the globally installed `compose-agentsmd` binary to regenerate the `compose-agentsmd` repository's own `AGENTS.md`.
+- After changing compose behavior, run `npm run verify`.
+- After changing ruleset schema behavior, update tests and README examples in the same change set.
