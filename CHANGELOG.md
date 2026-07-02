@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## 7.0.1 - 2026-07-02
+
+- Clarified tool-rule wording for the `sources` ruleset format.
+- Replaced legacy-looking singular `source` wording with GitHub source workspace wording.
+
 ## 7.0.0 - 2026-07-02
 
 - Breaking change: rulesets now use `sources` plus `profile`.
