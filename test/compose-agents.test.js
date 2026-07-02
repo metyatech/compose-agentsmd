@@ -98,6 +98,7 @@ const TOOL_RULES = normalizeTrailingWhitespace(
 );
 const DEFAULT_GLOBAL_OUTPUTS = [
   "~/.codex/AGENTS.md",
+  "~/.config/opencode/AGENTS.md",
   "~/.claude/CLAUDE.md",
   "~/.gemini/GEMINI.md",
   "~/.copilot/copilot-instructions.md"
@@ -292,6 +293,7 @@ it("composes AGENTS.md using sources and a profile", () =>
     );
     for (const globalPath of [
       path.join(fakeHome, ".codex", "AGENTS.md"),
+      path.join(fakeHome, ".config", "opencode", "AGENTS.md"),
       path.join(fakeHome, ".claude", "CLAUDE.md"),
       path.join(fakeHome, ".gemini", "GEMINI.md"),
       path.join(fakeHome, ".copilot", "copilot-instructions.md")

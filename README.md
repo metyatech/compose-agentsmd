@@ -47,6 +47,7 @@ By default, compose also writes a `CLAUDE.md` companion file containing an `@...
 By default, compose writes each source's `rules/global` to these user-global instruction files with the same composed content:
 
 - `~/.codex/AGENTS.md`
+- `~/.config/opencode/AGENTS.md`
 - `~/.claude/CLAUDE.md`
 - `~/.gemini/GEMINI.md`
 - `~/.copilot/copilot-instructions.md`

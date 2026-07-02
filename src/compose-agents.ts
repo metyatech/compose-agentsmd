@@ -15,6 +15,7 @@ const DEFAULT_RULESET_NAME = "agent-ruleset.json";
 const DEFAULT_OUTPUT = "AGENTS.md";
 const DEFAULT_CLAUDE_OUTPUT = "CLAUDE.md";
 const DEFAULT_CODEX_GLOBAL_OUTPUT = path.join(os.homedir(), ".codex", "AGENTS.md");
+const DEFAULT_OPENCODE_GLOBAL_OUTPUT = path.join(os.homedir(), ".config", "opencode", "AGENTS.md");
 const DEFAULT_CLAUDE_GLOBAL_OUTPUT = path.join(os.homedir(), ".claude", "CLAUDE.md");
 const DEFAULT_GEMINI_GLOBAL_OUTPUT = path.join(os.homedir(), ".gemini", "GEMINI.md");
 const DEFAULT_COPILOT_GLOBAL_OUTPUT = path.join(
@@ -766,6 +767,7 @@ const formatRuleSourcePath = (
 
 const getGlobalOutputPaths = (): string[] => [
   DEFAULT_CODEX_GLOBAL_OUTPUT,
+  DEFAULT_OPENCODE_GLOBAL_OUTPUT,
   DEFAULT_CLAUDE_GLOBAL_OUTPUT,
   DEFAULT_GEMINI_GLOBAL_OUTPUT,
   DEFAULT_COPILOT_GLOBAL_OUTPUT
