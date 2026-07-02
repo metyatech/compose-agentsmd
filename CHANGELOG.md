@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## 7.0.0 - 2026-07-02
+
+- Breaking change: rulesets now use `sources` plus `profile`.
+- Removed support for legacy `source`, `domains`, and `extra` ruleset keys.
+- Profiles are resolved from each source's `agent-profiles.json`.
+- Multiple sources are composed in declared order, enabling public/private overlays.
+
 ## 6.0.5 - 2026-06-03
 
 - Clarified the session gate so `compose-agentsmd` runs once per externally
