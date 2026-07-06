@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## 7.0.2 - 2026-07-06
+
+- Released the OpenCode global rules output added after 7.0.1.
+- Compose now writes global rules to `~/.config/opencode/AGENTS.md` in addition to the existing Codex, Claude, Gemini, and Copilot global instruction files.
+
 ## 7.0.1 - 2026-07-02
 
 - Clarified tool-rule wording for the `sources` ruleset format.
