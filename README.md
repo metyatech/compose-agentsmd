@@ -223,6 +223,5 @@ This repository contains the compose-agentsmd project.
 
 - [CHANGELOG.md](CHANGELOG.md)
 - [CONTRIBUTING.md](CONTRIBUTING.md)
-- [SECURITY.md](SECURITY.md)
 - [LICENSE](LICENSE)
 - [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
