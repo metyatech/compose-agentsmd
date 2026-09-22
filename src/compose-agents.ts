@@ -453,15 +453,14 @@ const collectMarkdownFiles = (rootDir: string): string[] => {
 type ComposeOptions = {
   refresh?: boolean;
   dryRun?: boolean;
-  emitDiffs?: boolean;
-  emitGlobalDiffs?: boolean;
+  inspectGlobalOutputs?: boolean;
 };
 
 type OutputScope = "repository" | "global";
 
-type OutputGroupDiff = {
+type OutputChange = {
   scope: OutputScope;
-  targets: string[];
+  target: string;
   status: "unchanged" | "updated";
   patch?: string;
 };
@@ -488,7 +487,7 @@ type ComposeResult = {
   repositoryOutputs: string[];
   globalOutputs: string[];
   repositoryFiles: RepositoryComposedFile[];
-  outputDiffs: OutputGroupDiff[];
+  outputChanges: OutputChange[];
   budgetResult: BudgetCheckResult;
 };
 
@@ -824,39 +823,26 @@ const countBudgetTokens = (content: string): number => {
   return countTokens(content);
 };
 
-const buildScopeDiff = (
+const buildOutputChange = (
   scope: OutputScope,
-  targetPaths: string[],
+  targetPath: string,
   desiredContent: string,
   rootDir: string
-): OutputGroupDiff | undefined => {
-  if (targetPaths.length === 0) {
-    return undefined;
-  }
+): OutputChange => {
+  const displayPath = toDisplayPath(rootDir, targetPath);
+  const before = fs.existsSync(targetPath) ? fs.readFileSync(targetPath, "utf8") : "";
 
-  const displayTargets = targetPaths.map((filePath) => toDisplayPath(rootDir, filePath));
-  const changedTargetPath = targetPaths.find((filePath) => {
-    if (!fs.existsSync(filePath)) {
-      return true;
-    }
-
-    return fs.readFileSync(filePath, "utf8") !== desiredContent;
-  });
-
-  if (!changedTargetPath) {
+  if (before === desiredContent) {
     return {
       scope,
-      targets: displayTargets,
+      target: displayPath,
       status: "unchanged"
     };
   }
 
-  const before = fs.existsSync(changedTargetPath) ? fs.readFileSync(changedTargetPath, "utf8") : "";
-  const displayPath = toDisplayPath(rootDir, changedTargetPath);
-
   return {
     scope,
-    targets: displayTargets,
+    target: displayPath,
     status: "updated",
     patch: createTwoFilesPatch(
       `a/${displayPath}`,
@@ -1058,26 +1044,9 @@ const composeRuleset = (
     });
   }
 
-  const outputDiffs: OutputGroupDiff[] = [];
-  if (options.emitDiffs) {
-    const repositoryDiff = buildScopeDiff(
-      "repository",
-      [primaryOutputPath],
-      primaryOutputContent,
-      rootDir
-    );
-    if (repositoryDiff) {
-      repositoryDiff.targets = repositoryOutputs;
-      outputDiffs.push(repositoryDiff);
-    }
-
-    if (options.emitGlobalDiffs !== false) {
-      const globalDiff = buildScopeDiff("global", globalOutputPaths, globalOutputContent, rootDir);
-      if (globalDiff) {
-        outputDiffs.push(globalDiff);
-      }
-    }
-  }
+  const outputChanges = composedFiles
+    .filter((file) => file.scope === "repository" || options.inspectGlobalOutputs !== false)
+    .map((file) => buildOutputChange(file.scope, file.absolutePath, file.content, rootDir));
 
   if (!options.dryRun) {
     for (const file of composedFiles) {
@@ -1092,14 +1061,15 @@ const composeRuleset = (
     repositoryOutputs,
     globalOutputs,
     repositoryFiles,
-    outputDiffs,
+    outputChanges,
     budgetResult
   };
 };
 
-const writeOutputDiff = (diff: OutputGroupDiff): void => {
-  const scopeLabel = diff.scope === "global" ? "Global outputs" : "Repository outputs";
-  if (diff.status === "unchanged") {
+const writeOutputChanges = (scope: OutputScope, changes: OutputChange[]): void => {
+  const scopeLabel = scope === "global" ? "Global outputs" : "Repository outputs";
+  const updatedChanges = changes.filter((change) => change.status === "updated");
+  if (updatedChanges.length === 0) {
     process.stdout.write(`${scopeLabel} unchanged.\n`);
     return;
   }
@@ -1107,20 +1077,27 @@ const writeOutputDiff = (diff: OutputGroupDiff): void => {
   process.stdout.write(
     `${scopeLabel} updated. ACTION (agent): refresh rule recognition from the diff below.\n`
   );
-  process.stdout.write(`Targets:\n${diff.targets.map((target) => `- ${target}`).join("\n")}\n`);
-  process.stdout.write(`--- BEGIN ${diff.scope.toUpperCase()} DIFF ---\n`);
-  if (diff.patch) {
-    process.stdout.write(diff.patch);
-    if (!diff.patch.endsWith("\n")) {
-      process.stdout.write("\n");
+  process.stdout.write(
+    `Targets:\n${updatedChanges.map((change) => `- ${change.target}`).join("\n")}\n`
+  );
+  process.stdout.write(`--- BEGIN ${scope.toUpperCase()} DIFF ---\n`);
+  for (const change of updatedChanges) {
+    if (change.patch) {
+      process.stdout.write(change.patch);
+      if (!change.patch.endsWith("\n")) {
+        process.stdout.write("\n");
+      }
     }
   }
-  process.stdout.write(`--- END ${diff.scope.toUpperCase()} DIFF ---\n`);
+  process.stdout.write(`--- END ${scope.toUpperCase()} DIFF ---\n`);
 };
 
 const printOutputDiffs = (result: ComposeResult): void => {
-  for (const diff of result.outputDiffs) {
-    writeOutputDiff(diff);
+  for (const scope of ["repository", "global"] as const) {
+    const changes = result.outputChanges.filter((change) => change.scope === scope);
+    if (changes.length > 0) {
+      writeOutputChanges(scope, changes);
+    }
   }
 };
 
@@ -1324,8 +1301,7 @@ const initProject = async (args: CliArgs, rootDir: string, rulesetName: string):
   let composedOutput: ComposeResult | undefined;
   if (args.compose) {
     composedOutput = composeRuleset(rulesetPath, rootDir, {
-      refresh: args.refresh ?? false,
-      emitDiffs: !args.quiet && !args.json
+      refresh: args.refresh ?? false
     });
   }
 
@@ -1337,6 +1313,7 @@ const initProject = async (args: CliArgs, rootDir: string, rulesetName: string):
           composed: composedOutput ? composedOutput.outputs : [],
           repositoryOutputs: composedOutput ? composedOutput.repositoryOutputs : [],
           globalOutputs: composedOutput ? composedOutput.globalOutputs : [],
+          changes: composedOutput ? composedOutput.outputChanges : [],
           dryRun: false,
           ...(composedOutput ? { budget: composedOutput.budgetResult } : {})
         },
@@ -1392,16 +1369,12 @@ const runCheck = (rulesetPath: string, rootDir: string, args: CliArgs): void => 
   const result = composeRuleset(rulesetPath, rootDir, {
     refresh: args.refresh ?? false,
     dryRun: true,
-    emitDiffs: true,
-    emitGlobalDiffs: false
+    inspectGlobalOutputs: false
   });
 
-  const staleFiles = result.repositoryFiles.filter((file) => {
-    const current = fs.existsSync(file.absolutePath)
-      ? fs.readFileSync(file.absolutePath, "utf8")
-      : null;
-    return current !== file.content;
-  });
+  const staleFiles = result.outputChanges
+    .filter((change) => change.scope === "repository" && change.status === "updated")
+    .map((change) => ({ displayPath: change.target }));
 
   const upToDate = staleFiles.length === 0;
 
@@ -1412,7 +1385,8 @@ const runCheck = (rulesetPath: string, rootDir: string, args: CliArgs): void => 
           check: true,
           upToDate,
           repositoryOutputs: result.repositoryOutputs,
-          stale: staleFiles.map((file) => file.displayPath)
+          stale: staleFiles.map((file) => file.displayPath),
+          changes: result.outputChanges
         },
         null,
         2
@@ -1431,11 +1405,7 @@ const runCheck = (rulesetPath: string, rootDir: string, args: CliArgs): void => 
           .map((file) => `- ${file.displayPath}`)
           .join("\n")}\n`
       );
-      for (const diff of result.outputDiffs) {
-        if (diff.scope === "repository" && diff.status === "updated") {
-          writeOutputDiff(diff);
-        }
-      }
+      writeOutputChanges("repository", result.outputChanges);
     }
   }
 
@@ -1535,8 +1505,7 @@ const main = async (): Promise<void> => {
 
     const output = composeRuleset(rulesetPath, rootDir, {
       refresh: true,
-      dryRun: args.dryRun,
-      emitDiffs: !args.quiet && !args.json
+      dryRun: args.dryRun
     });
     if (args.json) {
       process.stdout.write(
@@ -1545,6 +1514,7 @@ const main = async (): Promise<void> => {
             composed: output.outputs,
             repositoryOutputs: output.repositoryOutputs,
             globalOutputs: output.globalOutputs,
+            changes: output.outputChanges,
             dryRun: !!args.dryRun,
             budget: output.budgetResult
           },
@@ -1568,8 +1538,7 @@ const main = async (): Promise<void> => {
   const outputs = rulesetFiles.sort().map((rulesetPath) =>
     composeRuleset(rulesetPath, rootDir, {
       refresh: args.refresh,
-      dryRun: args.dryRun,
-      emitDiffs: !args.quiet && !args.json
+      dryRun: args.dryRun
     })
   );
 
@@ -1580,6 +1549,7 @@ const main = async (): Promise<void> => {
           composed: outputs.flatMap((result) => result.outputs),
           repositoryOutputs: outputs.flatMap((result) => result.repositoryOutputs),
           globalOutputs: outputs.flatMap((result) => result.globalOutputs),
+          changes: outputs.flatMap((result) => result.outputChanges),
           dryRun: !!args.dryRun,
           budget: outputs[0].budgetResult
         },
@@ -1595,7 +1565,7 @@ const main = async (): Promise<void> => {
         repositoryOutputs: outputs.flatMap((result) => result.repositoryOutputs),
         globalOutputs: outputs.flatMap((result) => result.globalOutputs),
         repositoryFiles: outputs.flatMap((result) => result.repositoryFiles),
-        outputDiffs: [],
+        outputChanges: [],
         budgetResult: outputs[0].budgetResult
       })
     );

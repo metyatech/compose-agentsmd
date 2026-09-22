@@ -181,6 +181,13 @@ const buildExpectedBudget = (blocks, overrides = {}) => ({
   ...overrides
 });
 
+const expectOutputChanges = (actual, expected) => {
+  expect(actual).toHaveLength(expected.length);
+  for (const expectedChange of expected) {
+    expect(actual).toContainEqual(expect.objectContaining(expectedChange));
+  }
+};
+
 // Writes an agent-profiles.json at a source root mapping profile names to domains.
 const writeProfileManifest = (sourceRoot, profiles) => {
   writeFile(path.join(sourceRoot, "agent-profiles.json"), JSON.stringify({ profiles }, null, 2));
@@ -821,9 +828,14 @@ it("does not duplicate output when output is CLAUDE.md", () =>
       composed: ["CLAUDE.md", ...DEFAULT_GLOBAL_OUTPUTS],
       repositoryOutputs: ["CLAUDE.md"],
       globalOutputs: DEFAULT_GLOBAL_OUTPUTS,
+      changes: expect.any(Array),
       dryRun: false,
       budget: buildExpectedBudget([onlyRule])
     });
+    expectOutputChanges(result.changes, [
+      { scope: "repository", target: "CLAUDE.md", status: "updated" },
+      ...DEFAULT_GLOBAL_OUTPUTS.map((target) => ({ scope: "global", target, status: "updated" }))
+    ]);
   }));
 
 it("fails fast when ruleset is missing", () =>
@@ -1044,9 +1056,18 @@ it("apply-rules supports --json output", () =>
       composed: DEFAULT_COMPOSED_OUTPUTS,
       repositoryOutputs: DEFAULT_REPOSITORY_OUTPUTS,
       globalOutputs: DEFAULT_GLOBAL_OUTPUTS,
+      changes: expect.any(Array),
       dryRun: false,
       budget: buildExpectedBudget([onlyRule])
     });
+    expectOutputChanges(result.changes, [
+      ...DEFAULT_REPOSITORY_OUTPUTS.map((target) => ({
+        scope: "repository",
+        target,
+        status: "updated"
+      })),
+      ...DEFAULT_GLOBAL_OUTPUTS.map((target) => ({ scope: "global", target, status: "updated" }))
+    ]);
 
     expect(fs.readFileSync(path.join(projectRoot, "AGENTS.md"), "utf8")).toBe(withToolRules(""));
     expect(fs.readFileSync(path.join(projectRoot, "CLAUDE.md"), "utf8")).toBe("@AGENTS.md\n");
@@ -1085,9 +1106,18 @@ it("apply-rules respects --dry-run with --json", () =>
       composed: DEFAULT_COMPOSED_OUTPUTS,
       repositoryOutputs: DEFAULT_REPOSITORY_OUTPUTS,
       globalOutputs: DEFAULT_GLOBAL_OUTPUTS,
+      changes: expect.any(Array),
       dryRun: true,
       budget: buildExpectedBudget([onlyRule])
     });
+    expectOutputChanges(result.changes, [
+      ...DEFAULT_REPOSITORY_OUTPUTS.map((target) => ({
+        scope: "repository",
+        target,
+        status: "updated"
+      })),
+      ...DEFAULT_GLOBAL_OUTPUTS.map((target) => ({ scope: "global", target, status: "updated" }))
+    ]);
     expect(fs.existsSync(path.join(projectRoot, "AGENTS.md"))).toBe(false);
     expect(fs.existsSync(path.join(projectRoot, "CLAUDE.md"))).toBe(false);
   }));
@@ -1179,9 +1209,122 @@ it("supports --json for machine-readable output", () =>
       composed: DEFAULT_COMPOSED_OUTPUTS,
       repositoryOutputs: DEFAULT_REPOSITORY_OUTPUTS,
       globalOutputs: DEFAULT_GLOBAL_OUTPUTS,
+      changes: expect.any(Array),
       dryRun: false,
       budget: buildExpectedBudget([onlyRule])
     });
+    expectOutputChanges(result.changes, [
+      ...DEFAULT_REPOSITORY_OUTPUTS.map((target) => ({
+        scope: "repository",
+        target,
+        status: "updated"
+      })),
+      ...DEFAULT_GLOBAL_OUTPUTS.map((target) => ({ scope: "global", target, status: "updated" }))
+    ]);
+
+    const repeatResult = JSON.parse(
+      runCli(["--json", "--root", projectRoot], { cwd: repoRoot, env: cliEnv })
+    );
+    expectOutputChanges(repeatResult.changes, [
+      ...DEFAULT_REPOSITORY_OUTPUTS.map((target) => ({
+        scope: "repository",
+        target,
+        status: "unchanged"
+      })),
+      ...DEFAULT_GLOBAL_OUTPUTS.map((target) => ({ scope: "global", target, status: "unchanged" }))
+    ]);
+  }));
+
+it("returns independent patches for stale global outputs", () =>
+  withTempRoot((tempRoot) => {
+    const fakeHome = path.join(tempRoot, "home");
+    const cliEnv = createCliEnv(fakeHome);
+    const projectRoot = path.join(tempRoot, "project");
+    const sourceRoot = path.join(tempRoot, "rules-source");
+
+    writeBaseSource(sourceRoot);
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify(
+        { sources: [relSource(projectRoot, sourceRoot)], profile: BASE_PROFILE },
+        null,
+        2
+      )
+    );
+
+    runCli(["--root", projectRoot], { cwd: repoRoot, env: cliEnv });
+    const globalPath = (target) => path.join(fakeHome, target.slice(2).replace(/\//gu, path.sep));
+    writeFile(globalPath(DEFAULT_GLOBAL_OUTPUTS[0]), "codex stale\n");
+    writeFile(globalPath(DEFAULT_GLOBAL_OUTPUTS[1]), "opencode stale\n");
+
+    const result = JSON.parse(
+      runCli(["--json", "--root", projectRoot], { cwd: repoRoot, env: cliEnv })
+    );
+    const expectedGlobalChanges = [
+      { scope: "global", target: DEFAULT_GLOBAL_OUTPUTS[0], status: "updated" },
+      { scope: "global", target: DEFAULT_GLOBAL_OUTPUTS[1], status: "updated" },
+      ...DEFAULT_GLOBAL_OUTPUTS.slice(2).map((target) => ({
+        scope: "global",
+        target,
+        status: "unchanged"
+      }))
+    ];
+    expectOutputChanges(
+      result.changes.filter((change) => change.scope === "global"),
+      expectedGlobalChanges
+    );
+
+    const codexChange = result.changes.find(
+      (change) => change.target === DEFAULT_GLOBAL_OUTPUTS[0]
+    );
+    const opencodeChange = result.changes.find(
+      (change) => change.target === DEFAULT_GLOBAL_OUTPUTS[1]
+    );
+    expect(codexChange.patch).toContain("codex stale");
+    expect(codexChange.patch).toContain("a/~/.codex/AGENTS.md");
+    expect(codexChange.patch).not.toContain("opencode stale");
+    expect(opencodeChange.patch).toContain("opencode stale");
+    expect(opencodeChange.patch).toContain("a/~/.config/opencode/AGENTS.md");
+    expect(opencodeChange.patch).not.toContain("codex stale");
+  }));
+
+it("returns separate repository patches for primary and Claude companion outputs", () =>
+  withTempRoot((tempRoot) => {
+    const cliEnv = createCliEnv(path.join(tempRoot, "home"));
+    const projectRoot = path.join(tempRoot, "project");
+    const sourceRoot = path.join(tempRoot, "rules-source");
+
+    writeBaseSource(sourceRoot);
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify(
+        { sources: [relSource(projectRoot, sourceRoot)], profile: BASE_PROFILE },
+        null,
+        2
+      )
+    );
+    writeFile(path.join(projectRoot, "AGENTS.md"), "primary stale\n");
+    writeFile(path.join(projectRoot, "CLAUDE.md"), "companion stale\n");
+
+    const result = JSON.parse(
+      runCli(["--json", "--root", projectRoot], { cwd: repoRoot, env: cliEnv })
+    );
+    expectOutputChanges(
+      result.changes.filter((change) => change.scope === "repository"),
+      DEFAULT_REPOSITORY_OUTPUTS.map((target) => ({
+        scope: "repository",
+        target,
+        status: "updated"
+      }))
+    );
+    const primaryChange = result.changes.find((change) => change.target === "AGENTS.md");
+    const companionChange = result.changes.find((change) => change.target === "CLAUDE.md");
+    expect(primaryChange.patch).toContain("primary stale");
+    expect(primaryChange.patch).toContain("a/AGENTS.md");
+    expect(primaryChange.patch).not.toContain("companion stale");
+    expect(companionChange.patch).toContain("companion stale");
+    expect(companionChange.patch).toContain("a/CLAUDE.md");
+    expect(companionChange.patch).not.toContain("primary stale");
   }));
 
 it("supports --dry-run for compose", () =>
@@ -1373,7 +1516,8 @@ it("check writes no files", () =>
 
 it("check supports --json output", () =>
   withTempRoot((tempRoot) => {
-    const cliEnv = createCliEnv(path.join(tempRoot, "home"));
+    const fakeHome = path.join(tempRoot, "home");
+    const cliEnv = createCliEnv(fakeHome);
     const projectRoot = path.join(tempRoot, "project");
     const sourceRoot = path.join(tempRoot, "rules-source");
 
@@ -1388,6 +1532,8 @@ it("check supports --json output", () =>
     );
 
     runCli(["--root", projectRoot], { cwd: repoRoot, env: cliEnv });
+    const staleGlobalPath = path.join(fakeHome, ".codex", "AGENTS.md");
+    writeFile(staleGlobalPath, "global stale content\n");
     const { status, stdout } = runCliStatus(["check", "--json", "--root", projectRoot], {
       cwd: repoRoot,
       env: cliEnv
@@ -1398,8 +1544,17 @@ it("check supports --json output", () =>
       check: true,
       upToDate: true,
       repositoryOutputs: DEFAULT_REPOSITORY_OUTPUTS,
-      stale: []
+      stale: [],
+      changes: expect.any(Array)
     });
+    expectOutputChanges(result.changes, [
+      ...DEFAULT_REPOSITORY_OUTPUTS.map((target) => ({
+        scope: "repository",
+        target,
+        status: "unchanged"
+      }))
+    ]);
+    expect(fs.readFileSync(staleGlobalPath, "utf8")).toBe("global stale content\n");
   }));
 
 it("init --dry-run does not write files", () =>
@@ -1452,9 +1607,7 @@ it("compose respects --dry-run with --json", () =>
     const projectRoot = path.join(tempRoot, "project");
     const sourceRoot = path.join(tempRoot, "rules-source");
 
-    writeBaseSource(sourceRoot, { global: null });
-    // Global directory is optional; ensure the rules root exists for local resolution.
-    fs.mkdirSync(path.join(sourceRoot, "rules"), { recursive: true });
+    writeBaseSource(sourceRoot);
     writeFile(
       path.join(projectRoot, "agent-ruleset.json"),
       JSON.stringify(
@@ -1473,8 +1626,21 @@ it("compose respects --dry-run with --json", () =>
     expect(result.composed).toEqual(DEFAULT_COMPOSED_OUTPUTS);
     expect(result.repositoryOutputs).toEqual(DEFAULT_REPOSITORY_OUTPUTS);
     expect(result.globalOutputs).toEqual(DEFAULT_GLOBAL_OUTPUTS);
+    expectOutputChanges(result.changes, [
+      ...DEFAULT_REPOSITORY_OUTPUTS.map((target) => ({
+        scope: "repository",
+        target,
+        status: "updated"
+      })),
+      ...DEFAULT_GLOBAL_OUTPUTS.map((target) => ({ scope: "global", target, status: "updated" }))
+    ]);
     expect(fs.existsSync(path.join(projectRoot, "AGENTS.md"))).toBe(false);
     expect(fs.existsSync(path.join(projectRoot, "CLAUDE.md"))).toBe(false);
+    for (const target of DEFAULT_GLOBAL_OUTPUTS) {
+      expect(fs.existsSync(path.join(cliEnv.HOME, target.slice(2).replace(/\//gu, path.sep)))).toBe(
+        false
+      );
+    }
   }));
 
 it("init --dry-run with --json outputs plan", () =>

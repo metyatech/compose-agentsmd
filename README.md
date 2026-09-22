@@ -56,7 +56,7 @@ Repository-local `AGENTS.md` contains the tool rules plus only the repository-fa
 
 Each composed rule section is prefixed with the source file path that produced it.
 
-When compose changes files, the CLI prints diffs for both repository outputs and global outputs. This works even when the project is not under git. `--quiet` and `--json` suppress this output.
+When compose changes files, the CLI prints diffs for both repository outputs and global outputs. This works even when the project is not under git. `--quiet` suppresses this output. With `--json`, the stable machine-readable `changes` array contains one per-output change, including its status and updated-file patch, so consumers never need to parse human-readable stdout.
 
 ## Check
 
