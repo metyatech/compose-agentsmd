@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## 7.1.1 - 2026-09-22
+
+- Removed the obsolete model-enforced manual Session gate now that trusted Codex hooks refresh instructions automatically.
+
 ## 7.1.0 - 2026-09-22
 
 - Added a stable machine-readable per-output `changes` array to compose, `apply-rules`, and `check` JSON output.

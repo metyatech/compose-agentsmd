@@ -211,11 +211,15 @@ const withTempRoot = (run) => {
   }
 };
 
-it("scopes the session gate to externally supplied instructions", () => {
-  expect(TOOL_RULES).toContain("externally supplied human/operator instruction");
-  expect(TOOL_RULES).toContain("run `compose-agentsmd` once");
-  expect(TOOL_RULES).toContain("generated continuations");
-  expect(TOOL_RULES).not.toContain("before responding to ANY user message");
+it("relies on trusted hooks instead of a model-enforced session gate", () => {
+  expect(TOOL_RULES).not.toContain("Session gate");
+  expect(TOOL_RULES).not.toContain("externally supplied human/operator instruction");
+  expect(TOOL_RULES).toContain("intentionally regenerates `AGENTS.md`");
+  expect(TOOL_RULES).toContain("run it via `npx compose-agentsmd`");
+  expect(TOOL_RULES).toContain("compose-agentsmd edit-rules");
+  expect(TOOL_RULES).toContain("compose-agentsmd apply-rules");
+  expect(TOOL_RULES).toContain("Do not edit `AGENTS.md` directly");
+  expect(TOOL_RULES).toContain("ANSI-colored diff-style preview");
 });
 
 it("prints version with --version and -V", () => {
