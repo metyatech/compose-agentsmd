@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## 7.1.0 - 2026-09-22
+
+- Added a stable machine-readable per-output `changes` array to compose, `apply-rules`, and `check` JSON output.
+- Unified human-readable diff rendering and JSON output on the same per-output change model, with independent patches for each repository and global instruction file.
+
 ## 7.0.2 - 2026-07-06
 
 - Released the OpenCode global rules output added after 7.0.1.
