@@ -8,7 +8,6 @@
 - `compose-agentsmd apply-rules` pushes each GitHub source workspace when its workspace is clean, then regenerates instruction files with refreshed rules.
 - Do not edit `AGENTS.md` directly; update the source rules and regenerate.
 - `tools/tool-rules.md` is the shared rule source for all repositories that use compose-agentsmd.
-- Before applying any rule updates, present the planned changes first with an ANSI-colored diff-style preview, ask for explicit approval, then make the edits.
 - These tool rules live in tools/tool-rules.md in the compose-agentsmd repository; do not duplicate them in other rule modules.
 
 Source: github:metyatech/agent-rules@HEAD/rules/domains/node/module-system.md

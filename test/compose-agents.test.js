@@ -219,7 +219,8 @@ it("relies on trusted hooks instead of a model-enforced session gate", () => {
   expect(TOOL_RULES).toContain("compose-agentsmd edit-rules");
   expect(TOOL_RULES).toContain("compose-agentsmd apply-rules");
   expect(TOOL_RULES).toContain("Do not edit `AGENTS.md` directly");
-  expect(TOOL_RULES).toContain("ANSI-colored diff-style preview");
+  expect(TOOL_RULES).not.toContain("ANSI-colored diff-style preview");
+  expect(TOOL_RULES).not.toContain("ask for explicit approval");
 });
 
 it("prints version with --version and -V", () => {

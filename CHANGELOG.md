@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## 7.1.2 - 2026-09-30
+
+- Removed the pre-edit rule-update approval gate; rule changes no longer require an ANSI-colored diff preview and explicit approval before edits.
+
 ## 7.1.1 - 2026-09-22
 
 - Removed the obsolete model-enforced manual Session gate now that trusted Codex hooks refresh instructions automatically.
