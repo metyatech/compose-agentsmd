@@ -8,6 +8,7 @@
 - `compose-agentsmd apply-rules` pushes each GitHub source workspace when its workspace is clean, then regenerates instruction files with refreshed rules.
 - Do not edit `AGENTS.md` directly; update the source rules and regenerate.
 - `tools/tool-rules.md` is the shared rule source for all repositories that use compose-agentsmd.
+- Before applying any rule updates, present the planned changes first with an ANSI-colored diff-style preview, ask for explicit approval, then make the edits.
 - These tool rules live in tools/tool-rules.md in the compose-agentsmd repository; do not duplicate them in other rule modules.
 
 Source: github:metyatech/agent-rules@HEAD/rules/domains/node/module-system.md
@@ -37,19 +38,32 @@ Source: github:metyatech/agent-rules@HEAD/rules/domains/agent-tooling/compositio
 
 # Agent Tooling Composition
 
-- Agent tooling repositories MUST keep generated instruction files reproducible from `agent-ruleset.json` and the selected `profile`.
-- A consuming repository's `agent-ruleset.json` MUST declare the complete ordered `sources` list and `profile` needed by that repository.
-- Profiles in `agent-profiles.json` MUST select the complete set of `rules/domains/*` domains needed by each repository type.
-- Rule source changes MUST be made in `rules/global/`, `rules/domains/`, `agent-profiles.json`, or other canonical source files selected by the rules source.
-- Generated `AGENTS.md` and `CLAUDE.md` diffs MUST be reviewed as generated instruction diffs, not hand-edited.
-- If a generated instruction file is stale, regenerate it with `compose-agentsmd` or the repository's canonical compose command before reporting completion.
-- Consuming repositories MUST NOT use legacy `source`, `domains`, or `extra` keys, and MUST NOT compensate for missing shared rules by adding repo-local extras or `agent-rules-local` files.
+- Agent tooling repositories MUST keep generated instruction files reproducible
+  from `agent-ruleset.json` and the selected `profile`.
+- A consuming repository's `agent-ruleset.json` MUST declare the complete
+  ordered `sources` list and `profile` needed by that repository.
+- Profiles in `agent-profiles.json` MUST select the complete set of
+  `rules/domains/*` domains needed by each repository type.
+- Rule source changes MUST be made in `rules/global/`, `rules/domains/`,
+  `agent-profiles.json`, or other canonical source files selected by the rules
+  source.
+- Generated `AGENTS.md` and `CLAUDE.md` diffs MUST be reviewed as generated
+  instruction diffs, not hand-edited.
+- If a generated instruction file is stale, regenerate it with
+  `compose-agentsmd` or the repository's canonical compose command before
+  reporting completion.
+- Consuming repositories MUST NOT use legacy `source`, `domains`, or `extra`
+  keys, and MUST NOT compensate for missing shared rules by adding repo-local
+  extras or `agent-rules-local` files.
 
 Source: github:metyatech/agent-rules@HEAD/rules/domains/compose-agentsmd/self-composition.md
 
 # Compose-Agentsmd Self Composition
 
-- For the `compose-agentsmd` repository only, generate instruction files using `npm run compose`.
-- Do not run the globally installed `compose-agentsmd` binary to regenerate the `compose-agentsmd` repository's own `AGENTS.md`.
+- For the `compose-agentsmd` repository only, generate instruction files using
+  `npm run compose`.
+- Do not run the globally installed `compose-agentsmd` binary to regenerate the
+  `compose-agentsmd` repository's own `AGENTS.md`.
 - After changing compose behavior, run `npm run verify`.
-- After changing ruleset schema behavior, update tests and README examples in the same change set.
+- After changing ruleset schema behavior, update tests and README examples in
+  the same change set.
