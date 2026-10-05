@@ -104,7 +104,7 @@ compose-agentsmd edit-rules
 compose-agentsmd apply-rules
 ```
 
-`edit-rules` prepares (or reuses) a writable workspace for each source, then prints the workspace path, rules directory, and next steps. `apply-rules` pushes each GitHub source workspace (if clean) and regenerates repository/global instruction files by refreshing the cache. For local-path sources, `edit-rules` points to the local workspace and `apply-rules` skips the push.
+`edit-rules` prepares (or reuses) a writable canonical workspace for each source, then prints the workspace path, rules directory, and next steps. For an unpinned/latest GitHub source, it resolves the remote default branch and uses that branch directly; do not create a task branch in the workspace. A clean workspace on another attached branch is switched to the canonical branch, while dirty, detached, or diverged workspaces are blocked without rewriting local commits. `apply-rules` requires a clean workspace on the canonical branch, fast-forwards it when it is behind, blocks non-canonical or diverged state, and pushes to the resolved default branch. Explicit-ref sources continue to use their configured ref. For local-path sources, `edit-rules` points to the local workspace and `apply-rules` skips the push.
 
 ## Project ruleset format
 

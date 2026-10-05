@@ -154,6 +154,129 @@ const runCliStatus = (args, options) => {
   return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
 };
 
+const runGit = (args, options = {}) =>
+  execFileSync("git", args, {
+    cwd: options.cwd,
+    env: { ...process.env, ...options.env },
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"]
+  }).trim();
+
+const createGithubWorkspaceFixture = (tempRoot, { defaultBranch = "main" } = {}) => {
+  const home = path.join(tempRoot, "home");
+  const bareRoot = path.join(tempRoot, "remote.git");
+  const seedRoot = path.join(tempRoot, "seed");
+  const workspaceRoot = path.join(home, ".agentsmd", "workspace", "test-owner", "test-repo");
+  const projectRoot = path.join(tempRoot, "project");
+  const gitConfig = path.join(home, "gitconfig");
+  fs.mkdirSync(home, { recursive: true });
+  fs.mkdirSync(projectRoot, { recursive: true });
+  fs.mkdirSync(path.dirname(workspaceRoot), { recursive: true });
+  runGit(["init", "--bare", bareRoot]);
+  runGit(["init", "-b", defaultBranch, workspaceRoot]);
+  writeFile(path.join(workspaceRoot, "rules", "global", "only.md"), "# Only\n1");
+  writeFile(
+    path.join(workspaceRoot, "agent-profiles.json"),
+    JSON.stringify({ profiles: { base: { domains: [] } } })
+  );
+  runGit(["add", "."], { cwd: workspaceRoot });
+  runGit(["commit", "-m", "Initial rules"], {
+    cwd: workspaceRoot,
+    env: {
+      GIT_AUTHOR_NAME: "Test User",
+      GIT_AUTHOR_EMAIL: "test@example.com",
+      GIT_COMMITTER_NAME: "Test User",
+      GIT_COMMITTER_EMAIL: "test@example.com"
+    }
+  });
+  runGit(["tag", "v1.0.0"], { cwd: workspaceRoot });
+  runGit(["remote", "add", "origin", bareRoot], { cwd: workspaceRoot });
+  runGit(["push", "-u", "origin", defaultBranch, "v1.0.0"], { cwd: workspaceRoot });
+  runGit(["symbolic-ref", "HEAD", `refs/heads/${defaultBranch}`], { cwd: bareRoot });
+  const localRemote = bareRoot.replace(/\\/gu, "/");
+  runGit([
+    "config",
+    "--file",
+    gitConfig,
+    `url.${localRemote}.insteadOf`,
+    "https://github.com/test-owner/test-repo.git"
+  ]);
+  const env = {
+    ...createCliEnv(home),
+    GIT_CONFIG_GLOBAL: gitConfig,
+    GIT_CONFIG_NOSYSTEM: "true",
+    GIT_TERMINAL_PROMPT: "0"
+  };
+  writeFile(
+    path.join(projectRoot, "agent-ruleset.json"),
+    JSON.stringify({ sources: ["github:test-owner/test-repo"], profile: "base" }, null, 2)
+  );
+  return { home, bareRoot, seedRoot, workspaceRoot, projectRoot, env, defaultBranch };
+};
+
+const prepareGithubWorkspace = (fixture) => {
+  return fixture.workspaceRoot;
+};
+
+const prepareRemoteWriter = (fixture) => {
+  if (!fs.existsSync(fixture.seedRoot)) {
+    runGit(["clone", fixture.bareRoot, fixture.seedRoot], { env: fixture.env });
+  }
+};
+
+const commitFile = (repoRootPath, fileName, content, env) => {
+  writeFile(path.join(repoRootPath, fileName), content);
+  runGit(["add", fileName], { cwd: repoRootPath, env });
+  runGit(["commit", "-m", `Update ${fileName}`], {
+    cwd: repoRootPath,
+    env: {
+      ...env,
+      GIT_AUTHOR_NAME: "Test User",
+      GIT_AUTHOR_EMAIL: "test@example.com",
+      GIT_COMMITTER_NAME: "Test User",
+      GIT_COMMITTER_EMAIL: "test@example.com"
+    }
+  });
+  return runGit(["rev-parse", "HEAD"], { cwd: repoRootPath, env });
+};
+
+const commitEmpty = (repoRootPath, message, env) => {
+  runGit(["commit", "--allow-empty", "-m", message], {
+    cwd: repoRootPath,
+    env: {
+      ...env,
+      GIT_AUTHOR_NAME: "Test User",
+      GIT_AUTHOR_EMAIL: "test@example.com",
+      GIT_COMMITTER_NAME: "Test User",
+      GIT_COMMITTER_EMAIL: "test@example.com"
+    }
+  });
+  return runGit(["rev-parse", "HEAD"], { cwd: repoRootPath, env });
+};
+
+const getRemoteBranchSha = (fixture, branch = fixture.defaultBranch) =>
+  runGit(["--git-dir", fixture.bareRoot, "rev-parse", `refs/heads/${branch}`], {
+    env: fixture.env
+  });
+
+const gitRefExists = (repoRootPath, ref, env) =>
+  (() => {
+    const result = spawnSync(
+      "git",
+      ["--git-dir", repoRootPath, "show-ref", "--verify", "--quiet", ref],
+      { env: { ...process.env, ...env }, encoding: "utf8" }
+    );
+    if (result.status === 0) {
+      return true;
+    }
+    if (result.status === 1) {
+      return false;
+    }
+    throw new Error(
+      result.stderr || result.error?.message || `git show-ref failed: ${result.status}`
+    );
+  })();
+
 const DEFAULT_BUDGET_OK = {
   tokenizer: BUDGET_TOKENIZER,
   totalBudget: DEFAULT_TOTAL_BUDGET,
@@ -218,6 +341,8 @@ it("relies on trusted hooks instead of a model-enforced session gate", () => {
   expect(TOOL_RULES).toContain("run it via `npx compose-agentsmd`");
   expect(TOOL_RULES).toContain("compose-agentsmd edit-rules");
   expect(TOOL_RULES).toContain("compose-agentsmd apply-rules");
+  expect(TOOL_RULES).toMatch(/Do not create additional task branches.*remote default branch/iu);
+  expect(TOOL_RULES).toMatch(/Explicit-ref sources keep their configured ref/u);
   expect(TOOL_RULES).toContain("Do not edit `AGENTS.md` directly");
   expect(TOOL_RULES).not.toContain("ANSI-colored diff-style preview");
   expect(TOOL_RULES).not.toContain("ask for explicit approval");
@@ -999,6 +1124,379 @@ it("edit-rules uses local source path as workspace", () =>
     expect(stdout).toMatch(/Next steps:/u);
     expect(stdout).toMatch(/compose-agentsmd apply-rules/u);
     expect(stdout).toMatch(/regenerate instruction files/u);
+  }));
+
+it("edit-rules returns a latest GitHub workspace to the remote default branch", () =>
+  withTempRoot((tempRoot) => {
+    const fixture = createGithubWorkspaceFixture(tempRoot);
+    prepareGithubWorkspace(fixture);
+    runGit(["switch", "-c", "codex/tutorial-authoring-v6-rule-sync"], {
+      cwd: fixture.workspaceRoot,
+      env: fixture.env
+    });
+
+    const result = runCliStatus(["edit-rules", "--root", fixture.projectRoot], {
+      cwd: repoRoot,
+      env: fixture.env
+    });
+    expect(result.stdout).toMatch(/Do not create task branches.*canonical branch/u);
+    const currentBranch = runGit(["branch", "--show-current"], {
+      cwd: fixture.workspaceRoot,
+      env: fixture.env
+    });
+    const headSha = runGit(["rev-parse", "HEAD"], {
+      cwd: fixture.workspaceRoot,
+      env: fixture.env
+    });
+    const originMainSha = runGit(["rev-parse", "origin/main"], {
+      cwd: fixture.workspaceRoot,
+      env: fixture.env
+    });
+    const statusPorcelain = runGit(["status", "--porcelain"], {
+      cwd: fixture.workspaceRoot,
+      env: fixture.env
+    });
+
+    expect(result.status).toBe(0);
+    expect(currentBranch).toBe("main");
+    expect(headSha).toBe(originMainSha);
+    expect(statusPorcelain).toBe("");
+  }));
+
+it("edit-rules creates a latest workspace on a non-main remote default branch", () =>
+  withTempRoot((tempRoot) => {
+    const fixture = createGithubWorkspaceFixture(tempRoot, { defaultBranch: "trunk" });
+    fs.renameSync(fixture.workspaceRoot, path.join(fixture.home, "workspace-before-edit"));
+    const result = runCliStatus(["edit-rules", "--root", fixture.projectRoot], {
+      cwd: repoRoot,
+      env: fixture.env
+    });
+    expect(result.status).toBe(0);
+    expect(
+      runGit(["branch", "--show-current"], { cwd: fixture.workspaceRoot, env: fixture.env })
+    ).toBe("trunk");
+    expect(fs.existsSync(path.join(fixture.workspaceRoot, ".git", "refs", "heads", "main"))).toBe(
+      false
+    );
+    expect(
+      runGit(["status", "--porcelain"], { cwd: fixture.workspaceRoot, env: fixture.env })
+    ).toBe("");
+  }));
+
+it("edit-rules fast-forwards a stale canonical workspace", () =>
+  withTempRoot((tempRoot) => {
+    const fixture = createGithubWorkspaceFixture(tempRoot);
+    prepareGithubWorkspace(fixture);
+    prepareRemoteWriter(fixture);
+    const originDefaultSha = commitFile(
+      fixture.seedRoot,
+      "remote-update.txt",
+      "remote\n",
+      fixture.env
+    );
+    runGit(["push", "origin", "main"], { cwd: fixture.seedRoot, env: fixture.env });
+    const result = runCliStatus(["edit-rules", "--root", fixture.projectRoot], {
+      cwd: repoRoot,
+      env: fixture.env
+    });
+    expect(result.status).toBe(0);
+    expect(runGit(["rev-parse", "HEAD"], { cwd: fixture.workspaceRoot, env: fixture.env })).toBe(
+      originDefaultSha
+    );
+  }));
+
+it("edit-rules preserves ahead commits on the canonical branch", () =>
+  withTempRoot((tempRoot) => {
+    const fixture = createGithubWorkspaceFixture(tempRoot);
+    prepareGithubWorkspace(fixture);
+    const localSha = commitFile(fixture.workspaceRoot, "local-update.txt", "local\n", fixture.env);
+    const result = runCliStatus(["edit-rules", "--root", fixture.projectRoot], {
+      cwd: repoRoot,
+      env: fixture.env
+    });
+    expect(result.status).toBe(0);
+    expect(
+      runGit(["branch", "--show-current"], { cwd: fixture.workspaceRoot, env: fixture.env })
+    ).toBe("main");
+    expect(
+      runGit(["cat-file", "-e", `${localSha}^{commit}`], {
+        cwd: fixture.workspaceRoot,
+        env: fixture.env
+      })
+    ).toBe("");
+  }));
+
+it("edit-rules recreates a missing local canonical tracking branch", () =>
+  withTempRoot((tempRoot) => {
+    const fixture = createGithubWorkspaceFixture(tempRoot, { defaultBranch: "trunk" });
+    prepareGithubWorkspace(fixture);
+    runGit(["switch", "-c", "codex/workspace-task"], {
+      cwd: fixture.workspaceRoot,
+      env: fixture.env
+    });
+    runGit(["branch", "-D", "trunk"], { cwd: fixture.workspaceRoot, env: fixture.env });
+    const expectedSha = getRemoteBranchSha(fixture, "trunk");
+    const result = runCliStatus(["edit-rules", "--root", fixture.projectRoot], {
+      cwd: repoRoot,
+      env: fixture.env
+    });
+    expect(result.status).toBe(0);
+    expect(
+      runGit(["branch", "--show-current"], { cwd: fixture.workspaceRoot, env: fixture.env })
+    ).toBe("trunk");
+    expect(runGit(["rev-parse", "HEAD"], { cwd: fixture.workspaceRoot, env: fixture.env })).toBe(
+      expectedSha
+    );
+    expect(
+      runGit(["config", "--get", "branch.trunk.remote"], {
+        cwd: fixture.workspaceRoot,
+        env: fixture.env
+      })
+    ).toBe("origin");
+  }));
+
+it.each(["task", "canonical"])(
+  "edit-rules blocks a dirty %s branch without changing it",
+  (branchKind) =>
+    withTempRoot((tempRoot) => {
+      const fixture = createGithubWorkspaceFixture(tempRoot);
+      prepareGithubWorkspace(fixture);
+      if (branchKind === "task") {
+        runGit(["switch", "-c", "codex/workspace-task"], {
+          cwd: fixture.workspaceRoot,
+          env: fixture.env
+        });
+      }
+      const branchBefore = runGit(["branch", "--show-current"], {
+        cwd: fixture.workspaceRoot,
+        env: fixture.env
+      });
+      const dirtyFile = path.join(fixture.workspaceRoot, "rules", "dirty.md");
+      writeFile(dirtyFile, "preserve me\n");
+      const result = runCliStatus(["edit-rules", "--root", fixture.projectRoot], {
+        cwd: repoRoot,
+        env: fixture.env
+      });
+      expect(result.status).not.toBe(0);
+      expect(
+        runGit(["branch", "--show-current"], { cwd: fixture.workspaceRoot, env: fixture.env })
+      ).toBe(branchBefore);
+      expect(fs.readFileSync(dirtyFile, "utf8")).toBe("preserve me\n");
+    })
+);
+
+it("edit-rules blocks a detached latest workspace without creating a branch", () =>
+  withTempRoot((tempRoot) => {
+    const fixture = createGithubWorkspaceFixture(tempRoot);
+    prepareGithubWorkspace(fixture);
+    const headBefore = runGit(["rev-parse", "HEAD"], {
+      cwd: fixture.workspaceRoot,
+      env: fixture.env
+    });
+    runGit(["switch", "--detach", headBefore], { cwd: fixture.workspaceRoot, env: fixture.env });
+    const branchesBefore = runGit(["branch", "--list"], {
+      cwd: fixture.workspaceRoot,
+      env: fixture.env
+    });
+    const result = runCliStatus(["edit-rules", "--root", fixture.projectRoot], {
+      cwd: repoRoot,
+      env: fixture.env
+    });
+    expect(result.status).not.toBe(0);
+    expect(runGit(["rev-parse", "HEAD"], { cwd: fixture.workspaceRoot, env: fixture.env })).toBe(
+      headBefore
+    );
+    expect(runGit(["branch", "--list"], { cwd: fixture.workspaceRoot, env: fixture.env })).toBe(
+      branchesBefore
+    );
+  }));
+
+it("edit-rules blocks diverged canonical history without changing local or remote heads", () =>
+  withTempRoot((tempRoot) => {
+    const fixture = createGithubWorkspaceFixture(tempRoot);
+    prepareGithubWorkspace(fixture);
+    const localSha = commitEmpty(fixture.workspaceRoot, "Local only", fixture.env);
+    prepareRemoteWriter(fixture);
+    commitEmpty(fixture.seedRoot, "Remote only", fixture.env);
+    runGit(["push", "origin", "main"], { cwd: fixture.seedRoot, env: fixture.env });
+    const remoteSha = getRemoteBranchSha(fixture);
+    const result = runCliStatus(["edit-rules", "--root", fixture.projectRoot], {
+      cwd: repoRoot,
+      env: fixture.env
+    });
+    expect(result.status).not.toBe(0);
+    expect(runGit(["rev-parse", "HEAD"], { cwd: fixture.workspaceRoot, env: fixture.env })).toBe(
+      localSha
+    );
+    expect(getRemoteBranchSha(fixture)).toBe(remoteSha);
+  }));
+
+it("apply-rules pushes an ahead canonical latest workspace to its default branch", () =>
+  withTempRoot((tempRoot) => {
+    const fixture = createGithubWorkspaceFixture(tempRoot);
+    prepareGithubWorkspace(fixture);
+    const localSha = commitFile(fixture.workspaceRoot, "local-update.txt", "local\n", fixture.env);
+    const result = runCliStatus(["apply-rules", "--root", fixture.projectRoot], {
+      cwd: repoRoot,
+      env: fixture.env
+    });
+    expect(result.status).toBe(0);
+    expect(getRemoteBranchSha(fixture)).toBe(localSha);
+  }));
+
+it("apply-rules fast-forwards a behind canonical workspace before pushing", () =>
+  withTempRoot((tempRoot) => {
+    const fixture = createGithubWorkspaceFixture(tempRoot);
+    prepareGithubWorkspace(fixture);
+    prepareRemoteWriter(fixture);
+    const remoteSha = commitEmpty(fixture.seedRoot, "Remote update", fixture.env);
+    runGit(["push", "origin", "main"], { cwd: fixture.seedRoot, env: fixture.env });
+    const result = runCliStatus(["apply-rules", "--root", fixture.projectRoot], {
+      cwd: repoRoot,
+      env: fixture.env
+    });
+    expect(result.status).toBe(0);
+    expect(runGit(["rev-parse", "HEAD"], { cwd: fixture.workspaceRoot, env: fixture.env })).toBe(
+      remoteSha
+    );
+    expect(getRemoteBranchSha(fixture)).toBe(remoteSha);
+  }));
+
+it("apply-rules blocks a non-canonical task branch without pushing it", () =>
+  withTempRoot((tempRoot) => {
+    const fixture = createGithubWorkspaceFixture(tempRoot);
+    prepareGithubWorkspace(fixture);
+    runGit(["switch", "-c", "codex/workspace-task"], {
+      cwd: fixture.workspaceRoot,
+      env: fixture.env
+    });
+    const taskSha = commitFile(fixture.workspaceRoot, "task-only.txt", "task\n", fixture.env);
+    runGit(["branch", "--set-upstream-to", "origin/main"], {
+      cwd: fixture.workspaceRoot,
+      env: fixture.env
+    });
+    const remoteTaskBefore = gitRefExists(
+      fixture.bareRoot,
+      "refs/heads/codex/workspace-task",
+      fixture.env
+    );
+    const remoteCanonicalBefore = getRemoteBranchSha(fixture);
+    const result = runCliStatus(["apply-rules", "--root", fixture.projectRoot], {
+      cwd: repoRoot,
+      env: fixture.env
+    });
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).toMatch(/non-canonical/u);
+    expect(runGit(["rev-parse", "HEAD"], { cwd: fixture.workspaceRoot, env: fixture.env })).toBe(
+      taskSha
+    );
+    expect(getRemoteBranchSha(fixture)).toBe(remoteCanonicalBefore);
+    expect(gitRefExists(fixture.bareRoot, "refs/heads/codex/workspace-task", fixture.env)).toBe(
+      remoteTaskBefore
+    );
+  }));
+
+it("apply-rules blocks a dirty canonical workspace without changing it", () =>
+  withTempRoot((tempRoot) => {
+    const fixture = createGithubWorkspaceFixture(tempRoot);
+    prepareGithubWorkspace(fixture);
+    const dirtyFile = path.join(fixture.workspaceRoot, "rules", "dirty.md");
+    writeFile(dirtyFile, "preserve me\n");
+    const headBefore = runGit(["rev-parse", "HEAD"], {
+      cwd: fixture.workspaceRoot,
+      env: fixture.env
+    });
+    const result = runCliStatus(["apply-rules", "--root", fixture.projectRoot], {
+      cwd: repoRoot,
+      env: fixture.env
+    });
+    expect(result.status).not.toBe(0);
+    expect(runGit(["rev-parse", "HEAD"], { cwd: fixture.workspaceRoot, env: fixture.env })).toBe(
+      headBefore
+    );
+    expect(fs.readFileSync(dirtyFile, "utf8")).toBe("preserve me\n");
+  }));
+
+it("apply-rules blocks detached latest workspaces without creating a branch", () =>
+  withTempRoot((tempRoot) => {
+    const fixture = createGithubWorkspaceFixture(tempRoot);
+    prepareGithubWorkspace(fixture);
+    const headBefore = runGit(["rev-parse", "HEAD"], {
+      cwd: fixture.workspaceRoot,
+      env: fixture.env
+    });
+    runGit(["switch", "--detach", headBefore], { cwd: fixture.workspaceRoot, env: fixture.env });
+    const detached = runCliStatus(["apply-rules", "--root", fixture.projectRoot], {
+      cwd: repoRoot,
+      env: fixture.env
+    });
+    expect(detached.status).not.toBe(0);
+    expect(runGit(["rev-parse", "HEAD"], { cwd: fixture.workspaceRoot, env: fixture.env })).toBe(
+      headBefore
+    );
+  }));
+
+it("apply-rules blocks a diverged latest workspace without changing either head", () =>
+  withTempRoot((tempRoot) => {
+    const fixture = createGithubWorkspaceFixture(tempRoot);
+    prepareGithubWorkspace(fixture);
+    runGit(["switch", "-c", "fixture-remote-advance"], {
+      cwd: fixture.workspaceRoot,
+      env: fixture.env
+    });
+    commitEmpty(fixture.workspaceRoot, "Remote only", fixture.env);
+    runGit(["push", "origin", "HEAD:main"], { cwd: fixture.workspaceRoot, env: fixture.env });
+    runGit(["switch", "main"], { cwd: fixture.workspaceRoot, env: fixture.env });
+    const localSha = commitEmpty(fixture.workspaceRoot, "Local only", fixture.env);
+    const remoteSha = getRemoteBranchSha(fixture);
+    const diverged = runCliStatus(["apply-rules", "--root", fixture.projectRoot], {
+      cwd: repoRoot,
+      env: fixture.env
+    });
+    expect(diverged.status).not.toBe(0);
+    expect(runGit(["rev-parse", "HEAD"], { cwd: fixture.workspaceRoot, env: fixture.env })).toBe(
+      localSha
+    );
+    expect(getRemoteBranchSha(fixture)).toBe(remoteSha);
+  }));
+
+it("edit-rules preserves an explicit GitHub ref instead of switching to default", () =>
+  withTempRoot((tempRoot) => {
+    const fixture = createGithubWorkspaceFixture(tempRoot, { defaultBranch: "trunk" });
+    prepareRemoteWriter(fixture);
+    runGit(["switch", "-c", "release"], { cwd: fixture.seedRoot, env: fixture.env });
+    commitFile(fixture.seedRoot, "release-only.txt", "release\n", fixture.env);
+    runGit(["push", "-u", "origin", "release"], { cwd: fixture.seedRoot, env: fixture.env });
+    writeFile(
+      path.join(fixture.projectRoot, "agent-ruleset.json"),
+      JSON.stringify({ sources: ["github:test-owner/test-repo@release"], profile: "base" }, null, 2)
+    );
+    const result = runCliStatus(["edit-rules", "--root", fixture.projectRoot], {
+      cwd: repoRoot,
+      env: fixture.env
+    });
+    expect(result.status).toBe(0);
+    expect(
+      runGit(["branch", "--show-current"], { cwd: fixture.workspaceRoot, env: fixture.env })
+    ).toBe("release");
+  }));
+
+it("edit-rules blocks when remote default branch cannot be resolved", () =>
+  withTempRoot((tempRoot) => {
+    const fixture = createGithubWorkspaceFixture(tempRoot);
+    prepareGithubWorkspace(fixture);
+    runGit(["symbolic-ref", "HEAD", "refs/heads/not-published"], {
+      cwd: fixture.bareRoot,
+      env: fixture.env
+    });
+    const result = runCliStatus(["edit-rules", "--root", fixture.projectRoot], {
+      cwd: repoRoot,
+      env: fixture.env
+    });
+    expect(result.status).not.toBe(0);
+    expect(`${result.stderr}\n${result.stdout}`).toMatch(
+      /Unable to resolve remote default branch/u
+    );
   }));
 
 it("apply-rules composes with refresh for local source", () =>

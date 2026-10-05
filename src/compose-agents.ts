@@ -491,11 +491,101 @@ type ComposeResult = {
   budgetResult: BudgetCheckResult;
 };
 
+type WorkspaceBranchState = "canonical" | "non_canonical" | "detached";
+
+type WorkspaceSyncState = "up_to_date" | "behind_fast_forwardable" | "ahead" | "diverged";
+
+interface LatestWorkspaceIdentity {
+  workspaceRoot: string;
+  source: string;
+  currentBranch: string | null;
+  canonicalBranch: string;
+  dirty: boolean;
+  branchState: WorkspaceBranchState;
+}
+
+interface LatestWorkspaceSync {
+  ahead: number;
+  behind: number;
+  state: WorkspaceSyncState;
+}
+
 const sanitizeCacheSegment = (value: string): string => value.replace(/[\\/]/gu, "__");
 const looksLikeCommitHash = (value: string): boolean => /^[a-f0-9]{7,40}$/iu.test(value);
 
 const execGit = (args: string[], cwd?: string): string =>
   execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+
+const resolveRemoteDefaultBranch = (workspaceRoot: string): string => {
+  let result: string;
+  try {
+    result = execGit(["ls-remote", "--symref", "origin", "HEAD"], workspaceRoot);
+  } catch {
+    throw new Error(`Unable to resolve remote default branch for ${workspaceRoot}`);
+  }
+
+  const match = result.match(/^ref:\s+refs\/heads\/([^\s]+)\s+HEAD$/mu);
+  if (!match?.[1]) {
+    throw new Error(`Unable to resolve remote default branch for ${workspaceRoot}`);
+  }
+  return match[1];
+};
+
+const getLatestWorkspaceIdentity = (
+  source: string,
+  workspaceRoot: string,
+  canonicalBranch: string
+): LatestWorkspaceIdentity => {
+  const dirty = execGit(["status", "--porcelain"], workspaceRoot) !== "";
+  const branch = execGit(["rev-parse", "--abbrev-ref", "HEAD"], workspaceRoot);
+  const currentBranch = branch === "HEAD" ? null : branch;
+  return {
+    workspaceRoot,
+    source,
+    currentBranch,
+    canonicalBranch,
+    dirty,
+    branchState:
+      currentBranch === null
+        ? "detached"
+        : currentBranch === canonicalBranch
+          ? "canonical"
+          : "non_canonical"
+  };
+};
+
+const getLatestWorkspaceSync = (
+  workspaceRoot: string,
+  canonicalBranch: string
+): LatestWorkspaceSync => {
+  const branch = execGit(["rev-parse", "--abbrev-ref", "HEAD"], workspaceRoot);
+  if (branch !== canonicalBranch) {
+    throw new Error(
+      `Cannot compare workspace sync outside canonical branch ${canonicalBranch}: ${branch}`
+    );
+  }
+
+  const counts = execGit(
+    ["rev-list", "--left-right", "--count", `HEAD...origin/${canonicalBranch}`],
+    workspaceRoot
+  )
+    .split(/\s+/u)
+    .map(Number);
+  const ahead = counts[0];
+  const behind = counts[1];
+  if (!Number.isInteger(ahead) || !Number.isInteger(behind)) {
+    throw new Error(`Unable to compare workspace sync for ${workspaceRoot}`);
+  }
+  const state: WorkspaceSyncState =
+    ahead === 0 && behind === 0
+      ? "up_to_date"
+      : ahead === 0
+        ? "behind_fast_forwardable"
+        : behind === 0
+          ? "ahead"
+          : "diverged";
+  return { ahead, behind, state };
+};
 
 const parseGithubSource = (source: string): GithubSource => {
   const trimmed = source.trim();
@@ -691,12 +781,91 @@ const ensureWorkspaceForGithubSource = (source: string): string => {
   return workspaceRoot;
 };
 
+const ensureLatestWorkspaceForEdit = (source: string): string => {
+  const workspaceRoot = ensureWorkspaceForGithubSource(source);
+  const dirty = execGit(["status", "--porcelain"], workspaceRoot) !== "";
+  if (dirty) {
+    throw new Error(`Workspace has uncommitted changes: ${workspaceRoot}`);
+  }
+
+  const current = execGit(["rev-parse", "--abbrev-ref", "HEAD"], workspaceRoot);
+  if (current === "HEAD") {
+    throw new Error(`Workspace is in detached HEAD state: ${workspaceRoot}`);
+  }
+
+  const canonicalBranch = resolveRemoteDefaultBranch(workspaceRoot);
+  const identity = getLatestWorkspaceIdentity(source, workspaceRoot, canonicalBranch);
+  execGit(["fetch", "origin"], workspaceRoot);
+
+  if (identity.currentBranch !== canonicalBranch) {
+    const localCanonicalExists =
+      execGit(["branch", "--list", canonicalBranch], workspaceRoot) !== "";
+    if (localCanonicalExists) {
+      execGit(["switch", canonicalBranch], workspaceRoot);
+    } else {
+      execGit(
+        ["switch", "--track", "-c", canonicalBranch, `origin/${canonicalBranch}`],
+        workspaceRoot
+      );
+    }
+  }
+
+  const sync = getLatestWorkspaceSync(workspaceRoot, canonicalBranch);
+  if (sync.state === "diverged") {
+    throw new Error(
+      `Workspace branch has diverged from origin/${canonicalBranch}: ${workspaceRoot}`
+    );
+  }
+  if (sync.state === "behind_fast_forwardable") {
+    execGit(["merge", "--ff-only", `origin/${canonicalBranch}`], workspaceRoot);
+  }
+
+  return workspaceRoot;
+};
+
+const prepareLatestWorkspaceForApply = (source: string, workspaceRoot: string): void => {
+  const status = execGit(["status", "--porcelain"], workspaceRoot);
+  if (status) {
+    throw new Error(`Workspace has uncommitted changes: ${workspaceRoot}`);
+  }
+  const branch = execGit(["rev-parse", "--abbrev-ref", "HEAD"], workspaceRoot);
+  if (branch === "HEAD") {
+    throw new Error(`Workspace is in detached HEAD state: ${workspaceRoot}`);
+  }
+
+  const canonicalBranch = resolveRemoteDefaultBranch(workspaceRoot);
+  const identity = getLatestWorkspaceIdentity(source, workspaceRoot, canonicalBranch);
+  execGit(["fetch", "origin"], workspaceRoot);
+  if (identity.branchState !== "canonical") {
+    throw new Error(
+      `Workspace is on non-canonical branch:\n${identity.currentBranch}\nExpected:\n${canonicalBranch}`
+    );
+  }
+
+  const sync = getLatestWorkspaceSync(workspaceRoot, canonicalBranch);
+  if (sync.state === "diverged") {
+    throw new Error(
+      `Workspace branch has diverged from origin/${canonicalBranch}: ${workspaceRoot}`
+    );
+  }
+  if (sync.state === "behind_fast_forwardable") {
+    execGit(["merge", "--ff-only", `origin/${canonicalBranch}`], workspaceRoot);
+  }
+  execGit(["push", "origin", `HEAD:${canonicalBranch}`], workspaceRoot);
+};
+
 const applyRulesFromWorkspace = (source: string): void => {
   if (!source.startsWith("github:")) {
     return;
   }
 
   const workspaceRoot = ensureWorkspaceForGithubSource(source);
+  const parsed = parseGithubSource(source);
+  if (parsed.ref === "latest") {
+    prepareLatestWorkspaceForApply(source, workspaceRoot);
+    return;
+  }
+
   const status = execGit(["status", "--porcelain"], workspaceRoot);
   if (status) {
     throw new Error(`Workspace has uncommitted changes: ${workspaceRoot}`);
@@ -1419,7 +1588,10 @@ const printEditRulesGuidance = (rulesetDir: string, ruleset: ProjectRuleset): vo
   for (const source of ruleset.sources) {
     let workspaceRoot = resolveWorkspaceRoot(rulesetDir, source);
     if (source.startsWith("github:")) {
-      workspaceRoot = ensureWorkspaceForGithubSource(source);
+      workspaceRoot =
+        parseGithubSource(source).ref === "latest"
+          ? ensureLatestWorkspaceForEdit(source)
+          : ensureWorkspaceForGithubSource(source);
     }
 
     const rulesDirectory = source.startsWith("github:")
@@ -1432,6 +1604,10 @@ const printEditRulesGuidance = (rulesetDir: string, ruleset: ProjectRuleset): vo
 
   lines.push("Next steps:");
   lines.push("- Edit rule files under the listed rules directories.");
+  lines.push(
+    "- Do not create task branches in GitHub rules workspaces; edit the canonical branch directly."
+  );
+  lines.push("- For an explicit GitHub ref, keep editing the configured ref.");
   lines.push("- If a source is GitHub, commit and push the workspace changes before apply-rules.");
   lines.push(
     "- Run compose-agentsmd apply-rules from your project root to apply updates and regenerate instruction files."
