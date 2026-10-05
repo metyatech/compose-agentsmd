@@ -12,6 +12,7 @@ const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..");
 const cliPath = path.join(repoRoot, "dist", "compose-agents.js");
 const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
+const PRE_COMMIT = fs.readFileSync(path.join(repoRoot, ".husky", "pre-commit"), "utf8");
 
 const writeFile = (filePath, content) => {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -193,13 +194,10 @@ const createGithubWorkspaceFixture = (tempRoot, { defaultBranch = "main" } = {})
   runGit(["remote", "add", "origin", bareRoot], { cwd: workspaceRoot });
   runGit(["push", "-u", "origin", defaultBranch, "v1.0.0"], { cwd: workspaceRoot });
   const localRemote = bareRoot.replace(/\\/gu, "/");
-  runGit([
-    "config",
-    "--file",
+  writeFile(
     gitConfig,
-    `url.${localRemote}.insteadOf`,
-    "https://github.com/test-owner/test-repo.git"
-  ]);
+    `[url "${localRemote}"]\n\tinsteadOf = https://github.com/test-owner/test-repo.git\n`
+  );
   const env = {
     ...createCliEnv(home),
     GIT_CONFIG_GLOBAL: gitConfig,
@@ -224,9 +222,7 @@ const prepareRemoteWriter = (fixture) => {
 };
 
 const pushRemoteCommitWithoutAdvancingLocalCanonical = (fixture, message) => {
-  const remoteBranch = "fixture-remote-commit";
-  runGit(["switch", "-c", remoteBranch], { cwd: fixture.workspaceRoot, env: fixture.env });
-  runGit(["commit", "--allow-empty", "-m", message], {
+  const remoteCommitSha = runGit(["commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", message], {
     cwd: fixture.workspaceRoot,
     env: {
       ...fixture.env,
@@ -236,11 +232,10 @@ const pushRemoteCommitWithoutAdvancingLocalCanonical = (fixture, message) => {
       GIT_COMMITTER_EMAIL: "test@example.com"
     }
   });
-  runGit(["push", "origin", `HEAD:${fixture.defaultBranch}`], {
+  runGit(["push", "origin", `${remoteCommitSha}:refs/heads/${fixture.defaultBranch}`], {
     cwd: fixture.workspaceRoot,
     env: fixture.env
   });
-  runGit(["switch", fixture.defaultBranch], { cwd: fixture.workspaceRoot, env: fixture.env });
 };
 
 const commitFile = (repoRootPath, fileName, content, env) => {
@@ -356,7 +351,9 @@ const withTempRoot = (run) => {
 it("relies on trusted hooks instead of a model-enforced session gate", () => {
   expect(TOOL_RULES).not.toContain("Session gate");
   expect(TOOL_RULES).not.toContain("externally supplied human/operator instruction");
-  expect(TOOL_RULES).toContain("intentionally regenerates `AGENTS.md`");
+  expect(TOOL_RULES).toMatch(/AGENTS\.md.*generated|generated.*AGENTS\.md/iu);
+  expect(TOOL_RULES).toMatch(/do not.*discard|must not.*discard/iu);
+  expect(TOOL_RULES).toMatch(/commit.*push/iu);
   expect(TOOL_RULES).toContain("run it via `npx compose-agentsmd`");
   expect(TOOL_RULES).toContain("compose-agentsmd edit-rules");
   expect(TOOL_RULES).toContain("compose-agentsmd apply-rules");
@@ -365,6 +362,26 @@ it("relies on trusted hooks instead of a model-enforced session gate", () => {
   expect(TOOL_RULES).toContain("Do not edit `AGENTS.md` directly");
   expect(TOOL_RULES).not.toContain("ANSI-colored diff-style preview");
   expect(TOOL_RULES).not.toContain("ask for explicit approval");
+});
+
+it("pre-commit refreshes and stages generated outputs before verify without swallowing failures", () => {
+  const commands = PRE_COMMIT.split(/\r?\n/u).map((line) => line.trim());
+  const composeIndex = commands.findIndex((line) => line === "npm run compose -- --refresh");
+  const stageIndex = commands.findIndex((line) => line === "git add -- AGENTS.md CLAUDE.md");
+  const verifyIndex = commands.findIndex((line) => line === "npm run verify");
+
+  expect(composeIndex).toBeGreaterThanOrEqual(0);
+  expect(stageIndex).toBeGreaterThan(composeIndex);
+  expect(verifyIndex).toBeGreaterThan(stageIndex);
+  expect(PRE_COMMIT).toContain("set -eu");
+  expect(PRE_COMMIT).not.toMatch(/\|\|\s*true/u);
+});
+
+it("verify includes generated repository output freshness", () => {
+  expect(packageJson.scripts["check:generated"]).toMatch(
+    /compose-agents\.js check --refresh --quiet/u
+  );
+  expect(packageJson.scripts.verify).toContain("npm run check:generated");
 });
 
 it("prints version with --version and -V", () => {
@@ -2137,7 +2154,7 @@ it("check does not inspect global output files", () =>
   }));
 
 // (14) check exits 1 when AGENTS.md is stale.
-it("check exits 1 when AGENTS.md is stale", () =>
+it("check detects stale AGENTS.md without modifying generated outputs", () =>
   withTempRoot((tempRoot) => {
     const cliEnv = createCliEnv(path.join(tempRoot, "home"));
     const projectRoot = path.join(tempRoot, "project");
@@ -2155,14 +2172,51 @@ it("check exits 1 when AGENTS.md is stale", () =>
 
     runCli(["--root", projectRoot], { cwd: repoRoot, env: cliEnv });
     writeFile(path.join(projectRoot, "AGENTS.md"), "stale content\n");
+    const staleAgents = fs.readFileSync(path.join(projectRoot, "AGENTS.md"), "utf8");
+    const claudeBefore = fs.readFileSync(path.join(projectRoot, "CLAUDE.md"), "utf8");
 
-    const { status, stdout } = runCliStatus(["check", "--root", projectRoot], {
+    const { status, stdout } = runCliStatus(["check", "--refresh", "--root", projectRoot], {
       cwd: repoRoot,
       env: cliEnv
     });
     expect(status).toBe(1);
     expect(stdout).toMatch(/Stale repository outputs/u);
     expect(stdout).toMatch(/- AGENTS\.md/u);
+    expect(fs.readFileSync(path.join(projectRoot, "AGENTS.md"), "utf8")).toBe(staleAgents);
+    expect(fs.readFileSync(path.join(projectRoot, "CLAUDE.md"), "utf8")).toBe(claudeBefore);
+  }));
+
+it("compose repairs stale repository outputs and generated check passes", () =>
+  withTempRoot((tempRoot) => {
+    const cliEnv = createCliEnv(path.join(tempRoot, "home"));
+    const projectRoot = path.join(tempRoot, "project");
+    const sourceRoot = path.join(tempRoot, "rules-source");
+
+    writeBaseSource(sourceRoot);
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify(
+        { sources: [relSource(projectRoot, sourceRoot)], profile: BASE_PROFILE },
+        null,
+        2
+      )
+    );
+
+    runCli(["--root", projectRoot], { cwd: repoRoot, env: cliEnv });
+    const expectedAgents = fs.readFileSync(path.join(projectRoot, "AGENTS.md"), "utf8");
+    const expectedClaude = fs.readFileSync(path.join(projectRoot, "CLAUDE.md"), "utf8");
+    writeFile(path.join(projectRoot, "AGENTS.md"), "stale AGENTS\n");
+    writeFile(path.join(projectRoot, "CLAUDE.md"), "stale CLAUDE\n");
+
+    runCli(["--root", projectRoot], { cwd: repoRoot, env: cliEnv });
+
+    expect(fs.readFileSync(path.join(projectRoot, "AGENTS.md"), "utf8")).toBe(expectedAgents);
+    expect(fs.readFileSync(path.join(projectRoot, "CLAUDE.md"), "utf8")).toBe(expectedClaude);
+    const { status } = runCliStatus(["check", "--root", projectRoot], {
+      cwd: repoRoot,
+      env: cliEnv
+    });
+    expect(status).toBe(0);
   }));
 
 // (15) check writes no files.

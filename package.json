@@ -40,7 +40,8 @@
     "prepare": "husky",
     "prepack": "npm run build",
     "test": "npm run build && vitest run",
-    "verify": "npm run lint && npm run format:check && npm test",
+    "check:generated": "npm run build && node dist/compose-agents.js check --refresh --quiet",
+    "verify": "npm run lint && npm run format:check && npm test && npm run check:generated",
     "compose": "npm run build && node dist/compose-agents.js"
   },
   "engines": {

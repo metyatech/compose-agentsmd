@@ -1,3 +1,5 @@
+set -eu
+
+npm run compose -- --refresh
+git add -- AGENTS.md CLAUDE.md
 npm run verify
-npm run compose || true
-git add AGENTS.md CLAUDE.md || true
