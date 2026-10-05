@@ -510,6 +510,15 @@ interface LatestWorkspaceSync {
   state: WorkspaceSyncState;
 }
 
+type NonCanonicalCommitState = "no_unique_commits" | "has_unique_commits";
+
+interface NonCanonicalCommitComparison {
+  currentBranch: string;
+  canonicalRef: string;
+  uniqueCommitCount: number;
+  state: NonCanonicalCommitState;
+}
+
 const sanitizeCacheSegment = (value: string): string => value.replace(/[\\/]/gu, "__");
 const looksLikeCommitHash = (value: string): boolean => /^[a-f0-9]{7,40}$/iu.test(value);
 
@@ -587,6 +596,27 @@ const getLatestWorkspaceSync = (
   return { ahead, behind, state };
 };
 
+const compareNonCanonicalCommits = (
+  workspaceRoot: string,
+  currentBranch: string,
+  canonicalRef: string
+): NonCanonicalCommitComparison => {
+  const rawCount = execGit(["rev-list", "--count", "HEAD", "--not", canonicalRef], workspaceRoot);
+  if (!/^\d+$/u.test(rawCount)) {
+    throw new Error(`Unable to compare commits on ${currentBranch} with ${canonicalRef}`);
+  }
+  const uniqueCommitCount = Number(rawCount);
+  if (!Number.isSafeInteger(uniqueCommitCount) || uniqueCommitCount < 0) {
+    throw new Error(`Unable to compare commits on ${currentBranch} with ${canonicalRef}`);
+  }
+  return {
+    currentBranch,
+    canonicalRef,
+    uniqueCommitCount,
+    state: uniqueCommitCount === 0 ? "no_unique_commits" : "has_unique_commits"
+  };
+};
+
 const parseGithubSource = (source: string): GithubSource => {
   const trimmed = source.trim();
   if (!trimmed.startsWith("github:")) {
@@ -603,66 +633,6 @@ const parseGithubSource = (source: string): GithubSource => {
 
   const ref = isNonEmptyString(refPart) ? refPart : "latest";
   return { owner, repo, ref, url: `https://github.com/${owner}/${repo}.git` };
-};
-
-const parseSemver = (tag: string): number[] | null => {
-  const cleaned = tag.startsWith("v") ? tag.slice(1) : tag;
-  const parts = cleaned.split(".");
-  if (parts.length < 2 || parts.length > 3) {
-    return null;
-  }
-
-  const numbers = parts.map((part) => Number(part));
-  if (numbers.some((value) => Number.isNaN(value))) {
-    return null;
-  }
-
-  return numbers;
-};
-
-const compareSemver = (a: number[], b: number[]): number => {
-  const maxLength = Math.max(a.length, b.length);
-  for (let i = 0; i < maxLength; i += 1) {
-    const left = a[i] ?? 0;
-    const right = b[i] ?? 0;
-    if (left !== right) {
-      return left - right;
-    }
-  }
-  return 0;
-};
-
-const resolveLatestTag = (repoUrl: string): { tag?: string; hash?: string } => {
-  const raw = execGit(["ls-remote", "--tags", "--refs", repoUrl]);
-  if (!raw) {
-    return {};
-  }
-
-  const candidates = raw
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const [hash, ref] = line.split(/\s+/u);
-      const tag = ref?.replace("refs/tags/", "");
-      if (!hash || !tag) {
-        return null;
-      }
-      const semver = parseSemver(tag);
-      if (!semver) {
-        return null;
-      }
-      return { hash, tag, semver };
-    })
-    .filter((item): item is { hash: string; tag: string; semver: number[] } => Boolean(item));
-
-  if (candidates.length === 0) {
-    return {};
-  }
-
-  candidates.sort((a, b) => compareSemver(a.semver, b.semver));
-  const latest = candidates[candidates.length - 1];
-  return { tag: latest.tag, hash: latest.hash };
 };
 
 const resolveHeadHash = (repoUrl: string): string => {
@@ -700,13 +670,9 @@ const resolveGithubRulesRoot = (
   refresh: boolean
 ): { rulesRoot: string; resolvedRef: string } => {
   const parsed = parseGithubSource(source);
-  const resolved = parsed.ref === "latest" ? resolveLatestTag(parsed.url) : null;
-  const resolvedRef = resolved?.tag ?? (parsed.ref === "latest" ? "HEAD" : parsed.ref);
+  const resolvedRef = parsed.ref === "latest" ? "HEAD" : parsed.ref;
   const resolvedHash =
-    resolved?.hash ??
-    (resolvedRef === "HEAD"
-      ? resolveHeadHash(parsed.url)
-      : resolveRefHash(parsed.url, resolvedRef));
+    resolvedRef === "HEAD" ? resolveHeadHash(parsed.url) : resolveRefHash(parsed.url, resolvedRef);
 
   if (!resolvedHash && !looksLikeCommitHash(resolvedRef)) {
     throw new Error(`Unable to resolve ref ${resolvedRef} for ${parsed.url}`);
@@ -800,6 +766,18 @@ const ensureLatestWorkspaceForEdit = (source: string): string => {
   if (identity.currentBranch !== canonicalBranch) {
     const localCanonicalExists =
       execGit(["branch", "--list", canonicalBranch], workspaceRoot) !== "";
+    const canonicalRef = localCanonicalExists ? canonicalBranch : `origin/${canonicalBranch}`;
+    const comparison = compareNonCanonicalCommits(
+      workspaceRoot,
+      identity.currentBranch ?? current,
+      canonicalRef
+    );
+    if (comparison.state === "has_unique_commits") {
+      throw new Error(
+        `Workspace non-canonical branch contains commits not present on canonical branch\nCurrent:\n${comparison.currentBranch}\nExpected:\n${canonicalBranch}\nUnique commits: ${comparison.uniqueCommitCount}`
+      );
+    }
+
     if (localCanonicalExists) {
       execGit(["switch", canonicalBranch], workspaceRoot);
     } else {
