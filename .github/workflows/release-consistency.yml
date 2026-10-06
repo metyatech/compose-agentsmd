@@ -1,0 +1,54 @@
+name: Release consistency
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - package.json
+      - package-lock.json
+      - CHANGELOG.md
+      - .github/workflows/release-consistency.yml
+  workflow_dispatch:
+
+jobs:
+  check-release-consistency:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: Check package metadata and exact npm version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")"
+          lock_version="$(node -p "JSON.parse(require('fs').readFileSync('package-lock.json', 'utf8')).version")"
+          lock_root_version="$(node -p "JSON.parse(require('fs').readFileSync('package-lock.json', 'utf8')).packages[''].version")"
+          changelog_version="$(node -e "const match = require('fs').readFileSync('CHANGELOG.md', 'utf8').match(/^## ([^\\s]+) -/m); if (!match) process.exit(1); process.stdout.write(match[1]);")"
+
+          if [[ "${version}" != "${lock_version}" || "${version}" != "${lock_root_version}" || "${version}" != "${changelog_version}" ]]; then
+            echo "::error::package.json, package-lock.json, and the latest CHANGELOG heading must all declare ${version}; found lock=${lock_version}, lock root=${lock_root_version}, changelog=${changelog_version}."
+            exit 1
+          fi
+
+          set +e
+          registry_result="$(npm view "compose-agentsmd@${version}" version 2>&1)"
+          registry_status=$?
+          set -e
+          if [[ "${registry_status}" -eq 0 && "${registry_result}" == "${version}" ]]; then
+            echo "Verified package.json version ${version} is published to npm."
+            exit 0
+          fi
+          if [[ "${registry_status}" -ne 0 && "${registry_result}" != *"No match found for version"* ]]; then
+            printf '%s\n' "npm view failed (not classified as unpublished):" "${registry_result}" >&2
+            exit "${registry_status}"
+          fi
+          echo "::error::package.json declares ${version} but compose-agentsmd@${version} is not published to npm. Create/publish GitHub Release v${version}."
+          exit 1

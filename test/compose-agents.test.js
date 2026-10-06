@@ -14,6 +14,44 @@ const cliPath = path.join(repoRoot, "dist", "compose-agents.js");
 const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
 const PRE_COMMIT = fs.readFileSync(path.join(repoRoot, ".husky", "pre-commit"), "utf8");
 
+it("release publish verifies matching metadata and exact npm version before and after publishing", () => {
+  const workflow = fs.readFileSync(
+    path.join(repoRoot, ".github", "workflows", "publish.yml"),
+    "utf8"
+  );
+  expect(workflow).toMatch(/on:\s*\n\s+release:\s*\n\s+types:\s*\[published\]/u);
+  expect(workflow).toContain("GITHUB_REF_NAME");
+  expect(workflow).toContain("v${version}");
+  expect(workflow).toContain("package-lock.json");
+  expect(workflow).toContain("CHANGELOG.md");
+  expect(workflow).toContain('npm view "compose-agentsmd@${version}" version');
+  expect(workflow).toContain("npm publish --provenance");
+  expect(workflow).toContain("already published; refusing a duplicate publish.");
+  expect(workflow.match(/npm view "compose-agentsmd@\$\{version\}" version/gu)).toHaveLength(2);
+  expect(workflow.indexOf('npm view "compose-agentsmd@${version}" version')).toBeLessThan(
+    workflow.indexOf("npm publish --provenance")
+  );
+  expect(workflow.lastIndexOf('npm view "compose-agentsmd@${version}" version')).toBeGreaterThan(
+    workflow.indexOf("npm publish --provenance")
+  );
+});
+
+it("release consistency workflow checks main metadata against the exact npm package version", () => {
+  const workflow = fs.readFileSync(
+    path.join(repoRoot, ".github", "workflows", "release-consistency.yml"),
+    "utf8"
+  );
+  expect(workflow).toMatch(/branches:\s*\n\s+- main/u);
+  for (const file of ["package.json", "package-lock.json", "CHANGELOG.md"]) {
+    expect(workflow).toContain(file);
+  }
+  expect(workflow).toContain('npm view "compose-agentsmd@${version}" version');
+  expect(workflow).toContain(
+    "package.json declares ${version} but compose-agentsmd@${version} is not published to npm."
+  );
+  expect(workflow).toContain("Create/publish GitHub Release v${version}.");
+});
+
 const writeFile = (filePath, content) => {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, content, "utf8");

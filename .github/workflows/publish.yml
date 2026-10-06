@@ -25,5 +25,66 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Validate release metadata and unpublished version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")"
+          expected_tag="v${version}"
+          if [[ "${GITHUB_REF_NAME}" != "${expected_tag}" ]]; then
+            echo "::error::Release tag ${GITHUB_REF_NAME} does not match package version ${expected_tag}."
+            exit 1
+          fi
+
+          lock_version="$(node -p "JSON.parse(require('fs').readFileSync('package-lock.json', 'utf8')).version")"
+          lock_root_version="$(node -p "JSON.parse(require('fs').readFileSync('package-lock.json', 'utf8')).packages[''].version")"
+          changelog_version="$(node -e "const match = require('fs').readFileSync('CHANGELOG.md', 'utf8').match(/^## ([^\\s]+) -/m); if (!match) process.exit(1); process.stdout.write(match[1]);")"
+          if [[ "${version}" != "${lock_version}" || "${version}" != "${lock_root_version}" || "${version}" != "${changelog_version}" ]]; then
+            echo "::error::package.json, package-lock.json, and the latest CHANGELOG heading must all declare ${version}; found lock=${lock_version}, lock root=${lock_root_version}, changelog=${changelog_version}."
+            exit 1
+          fi
+
+          set +e
+          registry_result="$(npm view "compose-agentsmd@${version}" version 2>&1)"
+          registry_status=$?
+          set -e
+          if [[ "${registry_status}" -eq 0 ]]; then
+            echo "::error::compose-agentsmd@${version} is already published; refusing a duplicate publish."
+            exit 1
+          fi
+          if [[ "${registry_result}" != *"No match found for version"* ]]; then
+            printf '%s\n' "npm view failed before publish (not classified as unpublished):" "${registry_result}" >&2
+            exit "${registry_status}"
+          fi
+
       - name: Publish package
         run: npm publish --provenance
+
+      - name: Verify exact npm version after publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")"
+          for attempt in {1..12}; do
+            set +e
+            registry_result="$(npm view "compose-agentsmd@${version}" version 2>&1)"
+            registry_status=$?
+            set -e
+            if [[ "${registry_status}" -eq 0 ]]; then
+              if [[ "${registry_result}" == "${version}" ]]; then
+                echo "Verified compose-agentsmd@${version} on npm."
+                exit 0
+              fi
+              printf '%s\n' "npm returned unexpected version '${registry_result}' for compose-agentsmd@${version}." >&2
+              exit 1
+            fi
+            if [[ "${registry_result}" != *"No match found for version"* ]]; then
+              printf '%s\n' "npm view failed after publish (not classified as propagation delay):" "${registry_result}" >&2
+              exit "${registry_status}"
+            fi
+            if [[ "${attempt}" -lt 12 ]]; then
+              sleep 10
+            fi
+          done
+          echo "::error::compose-agentsmd@${version} was published but is not visible on npm after 12 checks."
+          exit 1
