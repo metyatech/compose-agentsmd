@@ -402,17 +402,26 @@ it("relies on trusted hooks instead of a model-enforced session gate", () => {
   expect(TOOL_RULES).not.toContain("ask for explicit approval");
 });
 
-it("pre-commit refreshes and stages generated outputs before verify without swallowing failures", () => {
-  const commands = PRE_COMMIT.split(/\r?\n/u).map((line) => line.trim());
-  const composeIndex = commands.findIndex((line) => line === "npm run compose -- --refresh");
-  const stageIndex = commands.findIndex((line) => line === "git add -- AGENTS.md CLAUDE.md");
-  const verifyIndex = commands.findIndex((line) => line === "npm run verify");
-
-  expect(composeIndex).toBeGreaterThanOrEqual(0);
-  expect(stageIndex).toBeGreaterThan(composeIndex);
-  expect(verifyIndex).toBeGreaterThan(stageIndex);
+it("pre-commit only stages refreshed generated outputs", () => {
+  expect(PRE_COMMIT).toContain("set -eu");
+  expect(PRE_COMMIT).toMatch(/^git add -- AGENTS\.md CLAUDE\.md$/mu);
+  expect(PRE_COMMIT).not.toMatch(/npm run (?:compose|verify|build)|npm test|(?:lint|typecheck)/iu);
   expect(PRE_COMMIT).toContain("set -eu");
   expect(PRE_COMMIT).not.toMatch(/\|\|\s*true/u);
+});
+
+it("pre-push checks generated output freshness without writing", () => {
+  const prePushPath = path.join(repoRoot, ".husky", "pre-push");
+  expect(fs.existsSync(prePushPath)).toBe(true);
+  const prePush = fs.readFileSync(prePushPath, "utf8");
+  expect(prePush).toContain("set -eu");
+  expect(prePush).toMatch(/^npm run check:generated$/mu);
+  expect(prePush).not.toMatch(/npm run verify|npm run compose|(?:^|\s)compose-agentsmd(?:\s|$)/iu);
+  expect(prePush).not.toMatch(/\|\|\s*true/u);
+});
+
+it("does not retain the unused legacy pre-commit hook", () => {
+  expect(fs.existsSync(path.join(repoRoot, ".githooks", "pre-commit"))).toBe(false);
 });
 
 it("verify includes generated repository output freshness", () => {

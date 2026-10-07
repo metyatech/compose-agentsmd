@@ -1,5 +1,3 @@
 set -eu
 
-npm run compose -- --refresh
 git add -- AGENTS.md CLAUDE.md
-npm run verify
