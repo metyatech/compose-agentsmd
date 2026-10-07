@@ -44,7 +44,19 @@ it("release consistency workflow checks main metadata against the exact npm pack
     "utf8"
   );
   expect(workflow).toMatch(/branches:\s*\n\s+- main/u);
-  for (const file of ["package.json", "package-lock.json", "CHANGELOG.md"]) {
+  expect(workflow).toMatch(/uses:\s+actions\/checkout@v7\s*\n\s+with:\s*\n\s+fetch-depth:\s*0/u);
+  for (const file of [
+    "package.json",
+    "package-lock.json",
+    "CHANGELOG.md",
+    "src/**",
+    "tools/**",
+    "agent-ruleset.schema.json",
+    "tsconfig.json",
+    "README.md",
+    "LICENSE",
+    ".github/workflows/release-consistency.yml"
+  ]) {
     expect(workflow).toContain(file);
   }
   expect(workflow).toContain('npm view "compose-agentsmd@${version}" version');
@@ -52,7 +64,76 @@ it("release consistency workflow checks main metadata against the exact npm pack
     "package.json declares ${version} but compose-agentsmd@${version} is not published to npm."
   );
   expect(workflow).toContain("Create/publish GitHub Release v${version}.");
+  expect(workflow).toContain("refs/tags/v${version}");
+  const releaseDiffStart = workflow.indexOf('git diff --name-only "v${version}" --');
+  expect(releaseDiffStart).toBeGreaterThanOrEqual(0);
+  const releaseDiffEnd = workflow.indexOf("; then", releaseDiffStart);
+  const releaseDiffCommand = workflow.slice(releaseDiffStart, releaseDiffEnd);
+  for (const file of [
+    "src",
+    "tools",
+    "agent-ruleset.schema.json",
+    "package.json",
+    "tsconfig.json",
+    "README.md",
+    "LICENSE"
+  ]) {
+    expect(releaseDiffCommand).toContain(file);
+  }
+  expect(releaseDiffCommand).not.toContain("package-lock.json");
+  expect(workflow).toContain(
+    "Release-relevant files changed since v${version} while package version remains ${version}. Bump the package version and CHANGELOG before release."
+  );
+  expect(workflow).toContain('if [[ -n "${changed_files}" ]]');
+  expect(releaseDiffStart).toBeLessThan(
+    workflow.indexOf("Release-relevant files changed since v${version}")
+  );
 });
+
+it("release-required source changes differ from a tagged version while lockfile-only changes do not", () =>
+  withTempRoot((tempRoot) => {
+    const repositoryRoot = path.join(tempRoot, "release-fixture");
+    fs.mkdirSync(repositoryRoot, { recursive: true });
+    runGit(["init", "-b", "main", repositoryRoot]);
+    writeFile(path.join(repositoryRoot, "package.json"), '{"version":"7.2.0"}\n');
+    writeFile(path.join(repositoryRoot, "package-lock.json"), '{"version":"7.2.0"}\n');
+    writeFile(path.join(repositoryRoot, "src", "index.ts"), "export const version = 1;\n");
+    runGit(["add", "."], { cwd: repositoryRoot });
+    runGit(["commit", "-m", "tagged package version"], {
+      cwd: repositoryRoot,
+      env: {
+        GIT_AUTHOR_NAME: "Test User",
+        GIT_AUTHOR_EMAIL: "test@example.com",
+        GIT_COMMITTER_NAME: "Test User",
+        GIT_COMMITTER_EMAIL: "test@example.com"
+      }
+    });
+    runGit(["tag", "v7.2.0"], { cwd: repositoryRoot });
+
+    writeFile(path.join(repositoryRoot, "src", "index.ts"), "export const version = 2;\n");
+    writeFile(path.join(repositoryRoot, "package-lock.json"), '{"version":"7.2.0","x":1}\n');
+    const changedFiles = runGit(
+      [
+        "diff",
+        "--name-only",
+        "v7.2.0",
+        "--",
+        "src",
+        "tools",
+        "agent-ruleset.schema.json",
+        "package.json",
+        "tsconfig.json",
+        "README.md",
+        "LICENSE"
+      ],
+      { cwd: repositoryRoot }
+    );
+
+    expect(changedFiles).toBe("src/index.ts");
+    expect(runGit(["show", "v7.2.0:package.json"], { cwd: repositoryRoot })).toContain(
+      '"version":"7.2.0"'
+    );
+  }));
 
 const writeFile = (filePath, content) => {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });

@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## 7.2.0 - 2026-10-07
+
+- Changed unpinned GitHub sources (`github:owner/repo` and
+  `github:owner/repo@latest`) to resolve and compose from the remote default
+  branch HEAD instead of selecting the latest semantic-version tag. Explicit
+  branch, tag, and commit refs remain pinned.
+- Hardened GitHub rules workspaces so `edit-rules` safely normalizes unpinned
+  workspaces to the remote default branch, preserves unique local commits, and
+  blocks unsafe dirty, detached, or divergent states; `apply-rules`
+  fast-forwards safe behind workspaces and pushes to the resolved default
+  branch.
+- Reduced redundant Git work for unpinned GitHub sources by fetching resolved
+  HEAD commits directly and consolidating repeated workspace state checks.
+- Added generated repository-output freshness verification and separated local
+  hooks so pre-commit only stages refreshed generated outputs while pre-push
+  blocks stale generated outputs.
+- Fixed generated-output freshness checks on Windows by treating LF and CRLF
+  line endings as equivalent without modifying checked files.
+- Hardened release publication checks to validate release metadata and verify
+  the exact npm version before and after publishing.
+
 ## 7.1.2 - 2026-09-30
 
 - Removed the pre-edit rule-update approval gate; rule changes no longer require an ANSI-colored diff preview and explicit approval before edits.
