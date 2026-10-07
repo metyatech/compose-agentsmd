@@ -2169,6 +2169,81 @@ it("check exits 0 when repository outputs are current", () =>
     expect(stdout).toMatch(/Repository outputs are up to date/u);
   }));
 
+it("check treats CRLF repository outputs as fresh without changing their bytes", () =>
+  withTempRoot((tempRoot) => {
+    const cliEnv = createCliEnv(path.join(tempRoot, "home"));
+    const projectRoot = path.join(tempRoot, "project");
+    const sourceRoot = path.join(tempRoot, "rules-source");
+
+    writeBaseSource(sourceRoot);
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify(
+        { sources: [relSource(projectRoot, sourceRoot)], profile: BASE_PROFILE },
+        null,
+        2
+      )
+    );
+
+    runCli(["--root", projectRoot], { cwd: repoRoot, env: cliEnv });
+    const outputPaths = DEFAULT_REPOSITORY_OUTPUTS.map((target) => path.join(projectRoot, target));
+    for (const outputPath of outputPaths) {
+      const lfContent = fs.readFileSync(outputPath, "utf8");
+      expect(lfContent).toContain("\n");
+      expect(lfContent).not.toContain("\r\n");
+      fs.writeFileSync(outputPath, lfContent.replace(/\r\n|\n|\r/gu, "\r\n"), "utf8");
+    }
+    const bytesBefore = outputPaths.map((outputPath) => fs.readFileSync(outputPath));
+
+    const { status, stdout, stderr } = runCliStatus(["check", "--root", projectRoot], {
+      cwd: repoRoot,
+      env: cliEnv
+    });
+
+    expect(status).toBe(0);
+    expect(stderr).toBe("");
+    expect(stdout).toMatch(/Repository outputs are up to date/u);
+    for (const [index, outputPath] of outputPaths.entries()) {
+      expect(fs.readFileSync(outputPath)).toEqual(bytesBefore[index]);
+    }
+  }));
+
+it("check still detects real content differences in CRLF repository outputs", () =>
+  withTempRoot((tempRoot) => {
+    const cliEnv = createCliEnv(path.join(tempRoot, "home"));
+    const projectRoot = path.join(tempRoot, "project");
+    const sourceRoot = path.join(tempRoot, "rules-source");
+
+    writeBaseSource(sourceRoot);
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify(
+        { sources: [relSource(projectRoot, sourceRoot)], profile: BASE_PROFILE },
+        null,
+        2
+      )
+    );
+
+    runCli(["--root", projectRoot], { cwd: repoRoot, env: cliEnv });
+    const agentsPath = path.join(projectRoot, "AGENTS.md");
+    const lfContent = fs.readFileSync(agentsPath, "utf8");
+    const changedContent = `${lfContent[0] === "!" ? "?" : "!"}${lfContent.slice(1)}`;
+    expect(changedContent).not.toBe(lfContent);
+    fs.writeFileSync(agentsPath, changedContent.replace(/\r\n|\n|\r/gu, "\r\n"), "utf8");
+    const staleBytes = fs.readFileSync(agentsPath);
+
+    const { status, stdout, stderr } = runCliStatus(["check", "--root", projectRoot], {
+      cwd: repoRoot,
+      env: cliEnv
+    });
+
+    expect(status).toBe(1);
+    expect(stderr).toBe("");
+    expect(stdout).toMatch(/Stale repository outputs/u);
+    expect(stdout).toMatch(/- AGENTS\.md/u);
+    expect(fs.readFileSync(agentsPath)).toEqual(staleBytes);
+  }));
+
 it("check does not inspect global output files", () =>
   withTempRoot((tempRoot) => {
     const fakeHome = path.join(tempRoot, "home");

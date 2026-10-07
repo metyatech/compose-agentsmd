@@ -190,6 +190,7 @@ const parseArgs = (argv: string[]): CliArgs => {
 };
 
 const normalizeTrailingWhitespace = (content: string): string => content.replace(/\s+$/u, "");
+const normalizeLineEndings = (value: string): string => value.replace(/\r\n?/gu, "\n");
 const normalizePath = (filePath: string): string => filePath.replace(/\\/g, "/");
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === "string" && value.trim() !== "";
@@ -979,7 +980,7 @@ const buildOutputChange = (
   const displayPath = toDisplayPath(rootDir, targetPath);
   const before = fs.existsSync(targetPath) ? fs.readFileSync(targetPath, "utf8") : "";
 
-  if (before === desiredContent) {
+  if (normalizeLineEndings(before) === normalizeLineEndings(desiredContent)) {
     return {
       scope,
       target: displayPath,
