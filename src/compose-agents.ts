@@ -492,16 +492,15 @@ type ComposeResult = {
   budgetResult: BudgetCheckResult;
 };
 
-type WorkspaceBranchState = "canonical" | "non_canonical" | "detached";
+type WorkspaceBranchState = "canonical" | "non_canonical";
 
 type WorkspaceSyncState = "up_to_date" | "behind_fast_forwardable" | "ahead" | "diverged";
 
 interface LatestWorkspaceIdentity {
   workspaceRoot: string;
   source: string;
-  currentBranch: string | null;
+  currentBranch: string;
   canonicalBranch: string;
-  dirty: boolean;
   branchState: WorkspaceBranchState;
 }
 
@@ -543,24 +542,26 @@ const resolveRemoteDefaultBranch = (workspaceRoot: string): string => {
 
 const getLatestWorkspaceIdentity = (
   source: string,
-  workspaceRoot: string,
-  canonicalBranch: string
+  workspaceRoot: string
 ): LatestWorkspaceIdentity => {
   const dirty = execGit(["status", "--porcelain"], workspaceRoot) !== "";
+  if (dirty) {
+    throw new Error(`Workspace has uncommitted changes: ${workspaceRoot}`);
+  }
+
   const branch = execGit(["rev-parse", "--abbrev-ref", "HEAD"], workspaceRoot);
-  const currentBranch = branch === "HEAD" ? null : branch;
+  if (branch === "HEAD") {
+    throw new Error(`Workspace is in detached HEAD state: ${workspaceRoot}`);
+  }
+
+  const currentBranch = branch;
+  const canonicalBranch = resolveRemoteDefaultBranch(workspaceRoot);
   return {
     workspaceRoot,
     source,
     currentBranch,
     canonicalBranch,
-    dirty,
-    branchState:
-      currentBranch === null
-        ? "detached"
-        : currentBranch === canonicalBranch
-          ? "canonical"
-          : "non_canonical"
+    branchState: currentBranch === canonicalBranch ? "canonical" : "non_canonical"
   };
 };
 
@@ -691,15 +692,19 @@ const resolveGithubRulesRoot = (
 
   if (!fs.existsSync(cacheDir)) {
     ensureDir(path.dirname(cacheDir));
-    try {
-      cloneAtRef(parsed.url, resolvedRef, cacheDir);
-    } catch (error) {
-      if (resolvedHash && looksLikeCommitHash(resolvedHash)) {
-        fetchCommit(parsed.url, resolvedHash, cacheDir);
-      } else if (looksLikeCommitHash(resolvedRef)) {
-        fetchCommit(parsed.url, resolvedRef, cacheDir);
-      } else {
-        throw error;
+    if (resolvedRef === "HEAD" && resolvedHash && looksLikeCommitHash(resolvedHash)) {
+      fetchCommit(parsed.url, resolvedHash, cacheDir);
+    } else {
+      try {
+        cloneAtRef(parsed.url, resolvedRef, cacheDir);
+      } catch (error) {
+        if (resolvedHash && looksLikeCommitHash(resolvedHash)) {
+          fetchCommit(parsed.url, resolvedHash, cacheDir);
+        } else if (looksLikeCommitHash(resolvedRef)) {
+          fetchCommit(parsed.url, resolvedRef, cacheDir);
+        } else {
+          throw error;
+        }
       }
     }
   }
@@ -750,18 +755,8 @@ const ensureWorkspaceForGithubSource = (source: string): string => {
 
 const ensureLatestWorkspaceForEdit = (source: string): string => {
   const workspaceRoot = ensureWorkspaceForGithubSource(source);
-  const dirty = execGit(["status", "--porcelain"], workspaceRoot) !== "";
-  if (dirty) {
-    throw new Error(`Workspace has uncommitted changes: ${workspaceRoot}`);
-  }
-
-  const current = execGit(["rev-parse", "--abbrev-ref", "HEAD"], workspaceRoot);
-  if (current === "HEAD") {
-    throw new Error(`Workspace is in detached HEAD state: ${workspaceRoot}`);
-  }
-
-  const canonicalBranch = resolveRemoteDefaultBranch(workspaceRoot);
-  const identity = getLatestWorkspaceIdentity(source, workspaceRoot, canonicalBranch);
+  const identity = getLatestWorkspaceIdentity(source, workspaceRoot);
+  const canonicalBranch = identity.canonicalBranch;
   execGit(["fetch", "origin"], workspaceRoot);
 
   if (identity.currentBranch !== canonicalBranch) {
@@ -770,7 +765,7 @@ const ensureLatestWorkspaceForEdit = (source: string): string => {
     const canonicalRef = localCanonicalExists ? canonicalBranch : `origin/${canonicalBranch}`;
     const comparison = compareNonCanonicalCommits(
       workspaceRoot,
-      identity.currentBranch ?? current,
+      identity.currentBranch,
       canonicalRef
     );
     if (comparison.state === "has_unique_commits") {
@@ -803,17 +798,8 @@ const ensureLatestWorkspaceForEdit = (source: string): string => {
 };
 
 const prepareLatestWorkspaceForApply = (source: string, workspaceRoot: string): void => {
-  const status = execGit(["status", "--porcelain"], workspaceRoot);
-  if (status) {
-    throw new Error(`Workspace has uncommitted changes: ${workspaceRoot}`);
-  }
-  const branch = execGit(["rev-parse", "--abbrev-ref", "HEAD"], workspaceRoot);
-  if (branch === "HEAD") {
-    throw new Error(`Workspace is in detached HEAD state: ${workspaceRoot}`);
-  }
-
-  const canonicalBranch = resolveRemoteDefaultBranch(workspaceRoot);
-  const identity = getLatestWorkspaceIdentity(source, workspaceRoot, canonicalBranch);
+  const identity = getLatestWorkspaceIdentity(source, workspaceRoot);
+  const canonicalBranch = identity.canonicalBranch;
   execGit(["fetch", "origin"], workspaceRoot);
   if (identity.branchState !== "canonical") {
     throw new Error(
