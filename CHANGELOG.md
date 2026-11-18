@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## 7.3.0 - 2026-11-18
+
+- Added an edit-rules budget preview and read-only `check-budget` command with
+  conservative hard-budget matching for canonical agent-rules tests. The 7,000
+  token advisory target leaves the 8,000-token hard limit unchanged.
+- Added a multi-source post-sync preflight before GitHub pushes and made
+  `apply-rules --dry-run` strictly read-only.
+- Added boundary and Git-fixture tests for budget handling, synchronization, and
+  dry-run behavior.
+
 ## 7.2.0 - 2026-10-07
 
 - Changed unpinned GitHub sources (`github:owner/repo` and
