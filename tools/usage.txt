@@ -1,11 +1,12 @@
-Usage: compose-agentsmd [edit-rules|apply-rules|init|check] [--root <path>] [--ruleset <path>] [--ruleset-name <name>] [--profile <name>] [--output <file>] [--no-global] [--compose] [--dry-run] [--yes] [--force] [--refresh] [--clear-cache] [--version|-V] [--verbose|-v] [--quiet|-q] [--json] [--help|-h]
+Usage: compose-agentsmd [edit-rules|check-budget|apply-rules|init|check] [--root <path>] [--ruleset <path>] [--ruleset-name <name>] [--profile <name>] [--output <file>] [--no-global] [--compose] [--dry-run] [--yes] [--force] [--refresh] [--clear-cache] [--version|-V] [--verbose|-v] [--quiet|-q] [--json] [--help|-h]
 
 Commands:
   (default)            Compose instruction files from the ruleset
   init                 Generate a new ruleset (sources + profile)
   check                Verify generated repository outputs are current (exit 1 if stale)
-  edit-rules           Prepare or locate a writable rules workspace
-  apply-rules          Push workspace changes (GitHub sources) and regenerate rules with refresh
+  edit-rules           Prepare writable workspaces and report the editable global-rule budget
+  check-budget         Measure editable global rules without cloning, fetching, pushing, or writing
+  apply-rules          Preflight budget, push GitHub workspace changes, and regenerate rules
 
 Options:
   --help, -h           Show help and exit
@@ -20,8 +21,13 @@ Options:
   --output <file>      Repository output filename for init (default: AGENTS.md)
   --no-global          Initialize without user-global rules
   --compose            Compose repository and user-global instruction files after init
-  --dry-run            Show plan without writing files
+  --dry-run            Show plan without writing files; apply-rules also performs no Git mutation
   --yes                Skip init confirmation prompt
   --force              Overwrite existing files during init
   --refresh            Refresh cached remote rules
   --clear-cache        Remove cached remote rules and exit
+
+Examples:
+  compose-agentsmd edit-rules --root path/to/project
+  compose-agentsmd check-budget --root path/to/project --json
+  compose-agentsmd apply-rules --dry-run --root path/to/project

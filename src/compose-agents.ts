@@ -48,7 +48,7 @@ type CliArgs = {
   dryRun?: boolean;
   yes?: boolean;
   force?: boolean;
-  command?: "compose" | "edit-rules" | "apply-rules" | "init" | "check";
+  command?: "compose" | "edit-rules" | "apply-rules" | "init" | "check" | "check-budget";
 };
 
 const TOOL_RULES_PATH = new URL("../tools/tool-rules.md", import.meta.url);
@@ -78,11 +78,16 @@ const readValueArg = (remaining: string[], index: number, flag: string): string 
 
 const parseArgs = (argv: string[]): CliArgs => {
   const args: CliArgs = {};
-  const knownCommands = new Set(["edit-rules", "apply-rules", "init", "check"]);
+  const knownCommands = new Set(["edit-rules", "apply-rules", "init", "check", "check-budget"]);
   const remaining = [...argv];
 
   if (remaining.length > 0 && knownCommands.has(remaining[0])) {
-    args.command = remaining.shift() as "edit-rules" | "apply-rules" | "init" | "check";
+    args.command = remaining.shift() as
+      | "edit-rules"
+      | "apply-rules"
+      | "init"
+      | "check"
+      | "check-budget";
   }
 
   for (let i = 0; i < remaining.length; i += 1) {
@@ -455,6 +460,8 @@ type ComposeOptions = {
   refresh?: boolean;
   dryRun?: boolean;
   inspectGlobalOutputs?: boolean;
+  sourceContexts?: SourceContext[];
+  measureEditableBudget?: boolean;
 };
 
 type OutputScope = "repository" | "global";
@@ -474,6 +481,13 @@ type BudgetCheckResult = {
   overBudgetModules: Array<{ name: string; tokens: number }>;
   totalExceeded: boolean;
   moduleReviewTriggered: boolean;
+};
+
+type BudgetStatus = BudgetCheckResult & {
+  remainingTokens: number;
+  softTargetTokens: number;
+  reserveTokens: number;
+  softTargetExceeded: boolean;
 };
 
 type RepositoryComposedFile = {
@@ -727,15 +741,6 @@ const resolveLocalRulesRoot = (rulesetDir: string, source: string): string => {
   return candidate;
 };
 
-const resolveWorkspaceRoot = (rulesetDir: string, source: string): string => {
-  if (source.startsWith("github:")) {
-    const parsed = parseGithubSource(source);
-    return path.join(DEFAULT_WORKSPACE_ROOT, parsed.owner, parsed.repo);
-  }
-
-  return resolveFrom(rulesetDir, source);
-};
-
 const ensureWorkspaceForGithubSource = (source: string): string => {
   const parsed = parseGithubSource(source);
   const workspaceRoot = path.join(DEFAULT_WORKSPACE_ROOT, parsed.owner, parsed.repo);
@@ -844,6 +849,47 @@ const applyRulesFromWorkspace = (source: string): void => {
   execGit(["push"], workspaceRoot);
 };
 
+const validateAllWorkspacesBeforeApply = (sources: string[]): void => {
+  for (const source of sources) {
+    if (!source.startsWith("github:")) {
+      continue;
+    }
+    const workspaceRoot = path.join(
+      DEFAULT_WORKSPACE_ROOT,
+      parseGithubSource(source).owner,
+      parseGithubSource(source).repo
+    );
+    ensureDirectoryExists(workspaceRoot);
+    const parsed = parseGithubSource(source);
+    if (parsed.ref === "latest") {
+      const identity = getLatestWorkspaceIdentity(source, workspaceRoot);
+      if (identity.branchState !== "canonical") {
+        throw new Error(
+          `Workspace is on non-canonical branch:\n${identity.currentBranch}\nExpected:\n${identity.canonicalBranch}`
+        );
+      }
+      execGit(["fetch", "origin"], workspaceRoot);
+      const sync = getLatestWorkspaceSync(workspaceRoot, identity.canonicalBranch);
+      if (sync.state === "diverged") {
+        throw new Error(
+          `Workspace branch has diverged from origin/${identity.canonicalBranch}: ${workspaceRoot}`
+        );
+      }
+      continue;
+    }
+    const status = execGit(["status", "--porcelain"], workspaceRoot);
+    if (status) {
+      throw new Error(`Workspace has uncommitted changes: ${workspaceRoot}`);
+    }
+    const branch = execGit(["rev-parse", "--abbrev-ref", "HEAD"], workspaceRoot);
+    if (branch === "HEAD") {
+      throw new Error(`Workspace is in detached HEAD state: ${workspaceRoot}`);
+    }
+    execGit(["fetch", "--all"], workspaceRoot);
+    execGit(["rev-parse", "--verify", `${parsed.ref}^{commit}`], workspaceRoot);
+  }
+};
+
 // A resolved rules source: its on-disk rules root, the source repo root (which
 // holds `agent-profiles.json`), and the ref label used for rule provenance.
 type SourceContext = {
@@ -852,6 +898,43 @@ type SourceContext = {
   sourceRoot: string;
   resolvedRef?: string;
 };
+
+type EditableSourceSnapshot = SourceContext;
+
+const resolveEditableSources = (
+  rulesetDir: string,
+  sources: string[],
+  mode: "prepared-by-edit" | "read-only"
+): EditableSourceSnapshot[] =>
+  sources.map((source) => {
+    if (!source.startsWith("github:")) {
+      const rulesRoot = resolveLocalRulesRoot(rulesetDir, source);
+      return { source, sourceRoot: path.dirname(rulesRoot), rulesRoot };
+    }
+
+    const parsed = parseGithubSource(source);
+    const sourceRoot = path.join(DEFAULT_WORKSPACE_ROOT, parsed.owner, parsed.repo);
+    let workspaceRoot = sourceRoot;
+    if (mode === "prepared-by-edit") {
+      workspaceRoot =
+        parsed.ref === "latest"
+          ? ensureLatestWorkspaceForEdit(source)
+          : ensureWorkspaceForGithubSource(source);
+    } else {
+      ensureDirectoryExists(workspaceRoot);
+      if (!fs.existsSync(path.join(workspaceRoot, ".git"))) {
+        throw new Error(`GitHub source workspace is not a Git checkout: ${workspaceRoot}`);
+      }
+    }
+    const rulesRoot = path.join(workspaceRoot, "rules");
+    ensureDirectoryExists(rulesRoot);
+    return {
+      source,
+      sourceRoot: workspaceRoot,
+      rulesRoot,
+      resolvedRef: parsed.ref === "latest" ? "HEAD" : parsed.ref
+    };
+  });
 
 const resolveRulesRoot = (
   rulesetDir: string,
@@ -1017,6 +1100,44 @@ const collectGlobalParts = (sourceContexts: SourceContext[], rulesetDir: string)
   return parts;
 };
 
+const buildBudgetCheckResult = (
+  parts: RulePart[],
+  projectRuleset: ProjectRuleset
+): BudgetCheckResult => {
+  const totalBudget = projectRuleset.budget?.totalTokens ?? DEFAULT_TOTAL_BUDGET;
+  const moduleBudget = projectRuleset.budget?.moduleTokens ?? DEFAULT_MODULE_BUDGET;
+  const moduleTokenCounts = parts.map((part) => ({
+    name: part.name,
+    tokens: countBudgetTokens(part.content)
+  }));
+  const content = buildInstructionContent(
+    parts.map((part) => part.content),
+    false
+  );
+  const totalTokens = countBudgetTokens(content);
+  const overBudgetModules = moduleTokenCounts.filter((module) => module.tokens > moduleBudget);
+  return {
+    tokenizer: BUDGET_TOKENIZER,
+    totalTokens,
+    totalBudget,
+    moduleBudget,
+    overBudgetModules,
+    totalExceeded: totalTokens > totalBudget,
+    moduleReviewTriggered: overBudgetModules.length > 0
+  };
+};
+
+const withBudgetStatus = (result: BudgetCheckResult): BudgetStatus => {
+  const softTargetTokens = Math.floor(result.totalBudget * 0.875);
+  return {
+    ...result,
+    remainingTokens: result.totalBudget - result.totalTokens,
+    softTargetTokens,
+    reserveTokens: result.totalBudget - softTargetTokens,
+    softTargetExceeded: result.totalTokens > softTargetTokens
+  };
+};
+
 // Collects repository (domain) rule parts. Domains are chosen by the profile
 // manifest of each source. Overlays are preserved: the same domain in multiple
 // sources contributes each source's content in source order (no de-duplication).
@@ -1080,6 +1201,29 @@ const collectRepositoryParts = (
   return parts;
 };
 
+const measureEditableGlobalBudget = (
+  projectRuleset: ProjectRuleset,
+  rulesetDir: string,
+  sources: EditableSourceSnapshot[]
+): BudgetStatus => {
+  const contexts: SourceContext[] = sources.map((source) => ({ ...source }));
+  // Profile/domain validation is part of source validity even though this command
+  // only counts global rules.
+  collectRepositoryParts(contexts, projectRuleset.profile, rulesetDir);
+  return withBudgetStatus(
+    buildBudgetCheckResult(collectGlobalParts(contexts, rulesetDir), projectRuleset)
+  );
+};
+
+const enforceHardBudgetBeforeApply = (report: BudgetStatus): void => {
+  if (report.totalExceeded) {
+    throw new Error(
+      `Global rules hard budget exceeded (${report.tokenizer}): ` +
+        `${report.totalTokens}/${report.totalBudget} tokens (${report.remainingTokens} remaining)`
+    );
+  }
+};
+
 const composeRuleset = (
   rulesetPath: string,
   rootDir: string,
@@ -1093,11 +1237,9 @@ const composeRuleset = (
   );
   const composedOutputPath = toDisplayPath(rootDir, primaryOutputPath);
 
-  const sourceContexts = resolveSourceContexts(
-    rulesetDir,
-    projectRuleset.sources,
-    options.refresh ?? false
-  );
+  const sourceContexts =
+    options.sourceContexts ??
+    resolveSourceContexts(rulesetDir, projectRuleset.sources, options.refresh ?? false);
 
   const globalParts =
     projectRuleset.global !== false ? collectGlobalParts(sourceContexts, rulesetDir) : [];
@@ -1107,28 +1249,15 @@ const composeRuleset = (
     rulesetDir
   );
 
-  const totalBudget = projectRuleset.budget?.totalTokens ?? DEFAULT_TOTAL_BUDGET;
-  const moduleBudget = projectRuleset.budget?.moduleTokens ?? DEFAULT_MODULE_BUDGET;
-
   const repositoryContentParts = repositoryParts.map((part) => part.content);
   const globalContentParts = globalParts.map((part) => part.content);
   const primaryOutputContent = buildInstructionContent(repositoryContentParts, true);
   const globalOutputContent = buildInstructionContent(globalContentParts, false);
-  const moduleTokenCounts = globalParts.map((part) => ({
-    name: part.name,
-    tokens: countBudgetTokens(part.content)
-  }));
-  const totalTokens = countBudgetTokens(globalOutputContent);
-  const overBudgetModules = moduleTokenCounts.filter((module) => module.tokens > moduleBudget);
-  const budgetResult: BudgetCheckResult = {
-    tokenizer: BUDGET_TOKENIZER,
-    totalTokens,
-    totalBudget,
-    moduleBudget,
-    overBudgetModules,
-    totalExceeded: totalTokens > totalBudget,
-    moduleReviewTriggered: overBudgetModules.length > 0
-  };
+  const budgetParts =
+    options.measureEditableBudget || projectRuleset.global !== false
+      ? collectGlobalParts(sourceContexts, rulesetDir)
+      : globalParts;
+  const budgetResult = buildBudgetCheckResult(budgetParts, projectRuleset);
   const repositoryOutputs: string[] = [toDisplayPath(rootDir, primaryOutputPath)];
   const globalOutputs = globalOutputPaths.map((filePath) => toDisplayPath(rootDir, filePath));
   const repositoryFiles: RepositoryComposedFile[] = [
@@ -1278,6 +1407,57 @@ const emitBudgetReport = (args: CliArgs, budgetResult: BudgetCheckResult): void 
   if (budgetResult.totalExceeded || budgetResult.moduleReviewTriggered) {
     process.stderr.write(formatBudgetReport(budgetResult));
   }
+};
+
+const formatEditableBudgetStatus = (report: BudgetStatus): string => {
+  const softStatus = report.softTargetExceeded ? "above advisory target" : "within advisory target";
+  const lines = [
+    `Global rules budget (${report.tokenizer}): ${report.totalTokens}/${report.totalBudget} tokens; ${report.remainingTokens} remaining.`,
+    `Soft operating target: ${report.softTargetTokens} tokens (${softStatus}); reserved headroom: ${report.reserveTokens} tokens.`
+  ];
+  if (report.remainingTokens === 0) {
+    lines.push("NO HEADROOM: plan removal of overlap before adding further global rules.");
+  } else if (report.remainingTokens < 0) {
+    lines.push("HARD LIMIT EXCEEDED: remove or revise global rules before apply-rules.");
+  }
+  if (report.softTargetExceeded && !report.totalExceeded) {
+    lines.push("The soft target is advisory only; the hard limit remains the apply-rules gate.");
+  }
+  return `${lines.join("\n")}\n`;
+};
+
+const runCheckBudget = (rulesetPath: string, args: CliArgs, rootDir: string): BudgetStatus => {
+  const ruleset = readProjectRuleset(rulesetPath);
+  const rulesetDir = path.dirname(rulesetPath);
+  const sources = resolveEditableSources(rulesetDir, ruleset.sources, "read-only");
+  const budget = measureEditableGlobalBudget(ruleset, rulesetDir, sources);
+  const workspacePaths = sources.map((source) => ({
+    source: source.source,
+    path: source.sourceRoot
+  }));
+  if (args.json) {
+    process.stdout.write(
+      JSON.stringify(
+        {
+          checkBudget: true,
+          root: rootDir,
+          workspaces: workspacePaths,
+          budget
+        },
+        null,
+        2
+      ) + "\n"
+    );
+  } else if (!args.quiet) {
+    process.stdout.write(
+      `Editable source workspaces:\n${workspacePaths.map((item) => `- ${item.source}: ${item.path}`).join("\n")}\n`
+    );
+    process.stdout.write(formatEditableBudgetStatus(budget));
+  }
+  if (budget.totalExceeded) {
+    process.exitCode = 1;
+  }
+  return budget;
 };
 
 type InitPlanItem = {
@@ -1548,23 +1728,24 @@ const runCheck = (rulesetPath: string, rootDir: string, args: CliArgs): void => 
   }
 };
 
-const printEditRulesGuidance = (rulesetDir: string, ruleset: ProjectRuleset): void => {
+const printEditRulesGuidance = (
+  sources: EditableSourceSnapshot[],
+  budget: BudgetStatus,
+  args: CliArgs
+): void => {
+  const workspacePaths = sources.map((source) => ({
+    source: source.source,
+    path: source.sourceRoot
+  }));
+  if (args.json) {
+    process.stdout.write(JSON.stringify({ workspaces: workspacePaths, budget }, null, 2) + "\n");
+    return;
+  }
   const lines: string[] = [];
-  for (const source of ruleset.sources) {
-    let workspaceRoot = resolveWorkspaceRoot(rulesetDir, source);
-    if (source.startsWith("github:")) {
-      workspaceRoot =
-        parseGithubSource(source).ref === "latest"
-          ? ensureLatestWorkspaceForEdit(source)
-          : ensureWorkspaceForGithubSource(source);
-    }
-
-    const rulesDirectory = source.startsWith("github:")
-      ? path.join(workspaceRoot, "rules")
-      : resolveLocalRulesRoot(rulesetDir, source);
-
-    lines.push(`Rules workspace: ${workspaceRoot}`);
-    lines.push(`Rules directory: ${rulesDirectory}`);
+  for (const source of sources) {
+    lines.push(`Operational target: edit rule files in ${source.sourceRoot}`);
+    lines.push(`Rules workspace: ${source.sourceRoot}`);
+    lines.push(`Rules directory: ${source.rulesRoot}`);
   }
 
   lines.push("Next steps:");
@@ -1579,6 +1760,7 @@ const printEditRulesGuidance = (rulesetDir: string, ruleset: ProjectRuleset): vo
   );
 
   process.stdout.write(lines.join("\n") + "\n");
+  process.stdout.write(formatEditableBudgetStatus(budget));
 };
 
 const main = async (): Promise<void> => {
@@ -1606,7 +1788,7 @@ const main = async (): Promise<void> => {
   const command = args.command ?? "compose";
   const logVerbose = (message: string): void => {
     if (args.verbose) {
-      process.stdout.write(`${message}\n`);
+      (args.json ? process.stderr : process.stdout).write(`${message}\n`);
     }
   };
 
@@ -1621,7 +1803,9 @@ const main = async (): Promise<void> => {
     const rulesetPath = ensureSingleRuleset(rulesetFiles, rootDir, rulesetName);
     const rulesetDir = path.dirname(rulesetPath);
     const ruleset = readProjectRuleset(rulesetPath);
-    printEditRulesGuidance(rulesetDir, ruleset);
+    const sources = resolveEditableSources(rulesetDir, ruleset.sources, "prepared-by-edit");
+    const budget = measureEditableGlobalBudget(ruleset, rulesetDir, sources);
+    printEditRulesGuidance(sources, budget, args);
     return;
   }
 
@@ -1636,9 +1820,54 @@ const main = async (): Promise<void> => {
     return;
   }
 
+  if (command === "check-budget") {
+    const rulesetPath = ensureSingleRuleset(rulesetFiles, rootDir, rulesetName);
+    runCheckBudget(rulesetPath, args, rootDir);
+    return;
+  }
+
   if (command === "apply-rules") {
     const rulesetPath = ensureSingleRuleset(rulesetFiles, rootDir, rulesetName);
     const ruleset = readProjectRuleset(rulesetPath);
+    const rulesetDir = path.dirname(rulesetPath);
+    const editableSources = resolveEditableSources(rulesetDir, ruleset.sources, "read-only");
+    const budgetStatus = measureEditableGlobalBudget(ruleset, rulesetDir, editableSources);
+    enforceHardBudgetBeforeApply(budgetStatus);
+
+    if (args.dryRun) {
+      const output = composeRuleset(rulesetPath, rootDir, {
+        dryRun: true,
+        sourceContexts: editableSources,
+        measureEditableBudget: true
+      });
+      const editableBudget = buildBudgetCheckResult(
+        collectGlobalParts(editableSources, rulesetDir),
+        ruleset
+      );
+      if (args.json) {
+        process.stdout.write(
+          JSON.stringify(
+            {
+              composed: output.outputs,
+              repositoryOutputs: output.repositoryOutputs,
+              globalOutputs: output.globalOutputs,
+              changes: output.outputChanges,
+              dryRun: true,
+              budget: editableBudget
+            },
+            null,
+            2
+          ) + "\n"
+        );
+      } else if (!args.quiet) {
+        process.stdout.write(formatComposedOutputs(output));
+        process.stdout.write("Dry run: no Git or file changes made.\n");
+        process.stdout.write(formatEditableBudgetStatus(budgetStatus));
+      }
+      return;
+    }
+
+    validateAllWorkspacesBeforeApply(ruleset.sources);
 
     for (const source of ruleset.sources) {
       applyRulesFromWorkspace(source);
@@ -1657,7 +1886,8 @@ const main = async (): Promise<void> => {
             globalOutputs: output.globalOutputs,
             changes: output.outputChanges,
             dryRun: !!args.dryRun,
-            budget: output.budgetResult
+            budget: output.budgetResult,
+            editableBudget: budgetStatus
           },
           null,
           2
@@ -1667,6 +1897,7 @@ const main = async (): Promise<void> => {
       process.stdout.write(formatComposedOutputs(output));
       printOutputDiffs(output);
       emitBudgetReport(args, output.budgetResult);
+      process.stdout.write(formatEditableBudgetStatus(budgetStatus));
     }
     return;
   }

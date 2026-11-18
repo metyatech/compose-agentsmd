@@ -104,7 +104,20 @@ compose-agentsmd edit-rules
 compose-agentsmd apply-rules
 ```
 
-`edit-rules` prepares (or reuses) a writable canonical workspace for each source, then prints the workspace path, rules directory, and next steps. Both `github:owner/repo` and `github:owner/repo@latest` use the remote default branch HEAD for workspace editing and composition; they never select a semver tag automatically. Do not create a task branch in the workspace. A clean branch with no commits absent from canonical is switched to the canonical branch; dirty, detached, diverged, or commit-bearing non-canonical branches are blocked without rewriting or hiding local commits. `apply-rules` requires a clean workspace on the canonical branch, fast-forwards it when it is behind, blocks non-canonical or diverged state, and pushes to the resolved default branch. An explicit ref such as `github:owner/repo@v1.2.3`, `github:owner/repo@release`, or `github:owner/repo@<commit>` uses that configured ref for composition. For local-path sources, `edit-rules` points to the local workspace and `apply-rules` skips the push.
+`edit-rules` prepares (or reuses) a writable canonical workspace for each source, then prints the workspace path, rules directory, and editable global-rule budget. The count uses the complete composed global output and `o200k_base`; its hard limit defaults to 8,000 tokens. The soft operating target is 87.5% of the configured hard limit (7,000 at the default), with the difference reserved as growth headroom. The soft target is advisory; only exceeding the hard limit blocks `apply-rules`. At exactly the hard limit, editing succeeds and reports `NO HEADROOM` with a recommendation to plan removal of overlap before adding global rules. Use `--json` for machine-readable workspace and budget fields.
+
+Both `github:owner/repo` and `github:owner/repo@latest` use the remote default branch HEAD for workspace editing and composition; they never select a semver tag automatically. Do not create a task branch in the workspace. A clean branch with no commits absent from canonical is switched to the canonical branch; dirty, detached, diverged, or commit-bearing non-canonical branches are blocked without rewriting or hiding local commits. `apply-rules` requires a clean workspace on the canonical branch, fast-forwards it when it is behind, blocks non-canonical or diverged state, and pushes to the resolved default branch. An explicit ref such as `github:owner/repo@v1.2.3`, `github:owner/repo@release`, or `github:owner/repo@<commit>` uses that configured ref for composition. For local-path sources, `edit-rules` points to the local workspace and `apply-rules` skips the push.
+
+Check the current editable files repeatedly while editing:
+
+```sh
+compose-agentsmd check-budget --root path/to/project
+compose-agentsmd check-budget --root path/to/project --json
+```
+
+`check-budget` counts current local source files or canonical GitHub workspaces, including uncommitted edits. It measures global rules even when the project ruleset has `global: false`; that setting still controls whether compose writes user-global files. For GitHub sources it is read-only: it does not clone, fetch, push, generate output files, or fall back to a stale cache. A missing or incompatible workspace is an error.
+
+Before any GitHub push or generated output, `apply-rules` measures every configured editable source together and refuses a hard-limit overrun or any source/configuration error. `apply-rules --dry-run` reports the would-be output and budget without cloning, fetching, checking out, merging, pushing, changing branches, or writing repository or user-global files. It requires all GitHub workspaces to already exist and be readable. Editing source files never commits them automatically.
 
 In this repository, `AGENTS.md` and `CLAUDE.md` are canonical compose-generated outputs. Refresh them with `npm run compose -- --refresh`; never discard their generated diffs. The pre-commit hook only stages refreshed `AGENTS.md` and `CLAUDE.md` files. The pre-push hook checks generated output freshness and blocks pushes when outputs are stale. Run `npm run verify` explicitly as the final verification before committing; CI runs the same full verification.
 
@@ -205,7 +218,8 @@ Remote sources are cached under `~/.agentsmd/cache/<owner>/<repo>/<ref>/`. Use `
 - `--force`: overwrite existing files during init
 - `check`: verify generated repository outputs are current
 - `edit-rules`: prepare or locate a writable rules workspace
-- `apply-rules`: push workspace changes (if GitHub source) and regenerate rules with refresh
+- `check-budget`: measure the current editable global-rule budget; supports `--root` and `--json`
+- `apply-rules`: preflight the editable budget, push workspace changes (if GitHub source), and regenerate rules; `--dry-run` has no Git or file mutations
 - `init`: generate a new ruleset
 
 ## Development
