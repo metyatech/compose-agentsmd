@@ -439,13 +439,20 @@ const buildExpectedBudget = (blocks, overrides = {}) => ({
   ...overrides
 });
 
+const countCanonicalRuleBudget = (rulePath, body) => {
+  const canonicalRoot = path.join(os.tmpdir(), "agent-rules-budget-canonical");
+  const block = formatRuleBlock(rulePath, body, canonicalRoot);
+  return countBudgetTokens(buildGlobalOutput([block]));
+};
+
 const writeGlobalRuleAtTokenCount = (projectRoot, sourceRoot, totalTokens) => {
   const rulesRoot = path.join(sourceRoot, "rules");
   writeProfileManifest(sourceRoot, { [BASE_PROFILE]: { domains: [] } });
   const rulePath = path.join(rulesRoot, "global", "budget.md");
+  const canonicalRoot = path.join(os.tmpdir(), "agent-rules-budget-canonical");
   const countFor = (repetitions) => {
     const body = `# Budget\n${" x".repeat(repetitions)}`;
-    const block = formatRuleBlock(rulePath, body, projectRoot);
+    const block = formatRuleBlock(rulePath, body, canonicalRoot);
     return countBudgetTokens(buildGlobalOutput([block]));
   };
   let repetitions = Math.max(0, totalTokens - countFor(0));
@@ -1968,6 +1975,11 @@ it("apply-rules supports --json output", () =>
       "# Only\n1",
       projectRoot
     );
+    const actualTokens = countBudgetTokens(buildGlobalOutput([onlyRule]));
+    const canonicalTokens = countCanonicalRuleBudget(
+      path.join(rulesRoot, "global", "only.md"),
+      "# Only\n1"
+    );
     expect(result).toEqual({
       composed: DEFAULT_COMPOSED_OUTPUTS,
       repositoryOutputs: DEFAULT_REPOSITORY_OUTPUTS,
@@ -1977,10 +1989,13 @@ it("apply-rules supports --json output", () =>
       budget: buildExpectedBudget([onlyRule]),
       editableBudget: {
         ...buildExpectedBudget([onlyRule]),
-        remainingTokens: DEFAULT_TOTAL_BUDGET - countBudgetTokens(buildGlobalOutput([onlyRule])),
+        totalTokens: Math.max(actualTokens, canonicalTokens),
+        actualTokens,
+        canonicalTokens,
+        remainingTokens: DEFAULT_TOTAL_BUDGET - Math.max(actualTokens, canonicalTokens),
         softTargetTokens: 7000,
         reserveTokens: 1000,
-        softTargetExceeded: countBudgetTokens(buildGlobalOutput([onlyRule])) > 7000
+        softTargetExceeded: Math.max(actualTokens, canonicalTokens) > 7000
       }
     });
     expectOutputChanges(result.changes, [
@@ -2025,13 +2040,27 @@ it("apply-rules respects --dry-run with --json", () =>
       "# Only\n1",
       projectRoot
     );
+    const actualTokens = countBudgetTokens(buildGlobalOutput([onlyRule]));
+    const canonicalTokens = countCanonicalRuleBudget(
+      path.join(rulesRoot, "global", "only.md"),
+      "# Only\n1"
+    );
     expect(result).toEqual({
       composed: DEFAULT_COMPOSED_OUTPUTS,
       repositoryOutputs: DEFAULT_REPOSITORY_OUTPUTS,
       globalOutputs: DEFAULT_GLOBAL_OUTPUTS,
       changes: expect.any(Array),
       dryRun: true,
-      budget: buildExpectedBudget([onlyRule])
+      budget: {
+        ...buildExpectedBudget([onlyRule]),
+        totalTokens: Math.max(actualTokens, canonicalTokens),
+        actualTokens,
+        canonicalTokens,
+        remainingTokens: DEFAULT_TOTAL_BUDGET - Math.max(actualTokens, canonicalTokens),
+        softTargetTokens: 7000,
+        reserveTokens: 1000,
+        softTargetExceeded: Math.max(actualTokens, canonicalTokens) > 7000
+      }
     });
     expectOutputChanges(result.changes, [
       ...DEFAULT_REPOSITORY_OUTPUTS.map((target) => ({
@@ -2938,6 +2967,8 @@ it.each([7999, 8000, 8001])(
       });
       const report = JSON.parse(result.stdout).budget;
       expect(report.totalTokens).toBe(tokens);
+      expect(report.canonicalTokens).toBe(tokens);
+      expect(report.actualTokens).toBeLessThanOrEqual(report.canonicalTokens);
       expect(report.remainingTokens).toBe(8000 - tokens);
       expect(report.totalExceeded).toBe(tokens > 8000);
       expect(report.softTargetTokens).toBe(7000);
@@ -2966,11 +2997,38 @@ it.each([7000, 7001])("check-budget reports the %i-token soft boundary as adviso
     });
     const report = JSON.parse(result.stdout).budget;
     expect(report.totalTokens).toBe(tokens);
+    expect(report.canonicalTokens).toBe(tokens);
+    expect(report.actualTokens).toBeLessThanOrEqual(report.canonicalTokens);
     expect(report.softTargetExceeded).toBe(tokens > 7000);
     expect(report.totalExceeded).toBe(false);
     expect(result.status).toBe(0);
   })
 );
+
+it("check-budget selects the larger whole-composition provenance count", () =>
+  withTempRoot((tempRoot) => {
+    const sourceRoot = path.join(tempRoot, "source");
+    const projectRoot = path.join(tempRoot, ...Array(36).fill("deep"), "project");
+    const rulesRoot = path.join(sourceRoot, "rules");
+    writeBaseSource(sourceRoot);
+    writeFile(path.join(rulesRoot, "global", "rule.md"), `# Provenance\n${" words".repeat(80)}`);
+    writeFile(
+      path.join(projectRoot, "agent-ruleset.json"),
+      JSON.stringify(
+        { sources: [relSource(projectRoot, sourceRoot)], profile: BASE_PROFILE, global: false },
+        null,
+        2
+      )
+    );
+    const result = runCliStatus(["check-budget", "--json", "--root", projectRoot], {
+      cwd: repoRoot
+    });
+    expect(result.status, result.stderr).toBe(0);
+    const budget = JSON.parse(result.stdout).budget;
+    expect(budget.actualTokens).toBeGreaterThan(budget.canonicalTokens);
+    expect(budget.totalTokens).toBe(budget.actualTokens);
+    expect(budget.totalTokens).toBeLessThan(budget.actualTokens + budget.canonicalTokens);
+  }));
 
 it("check-budget reads GitHub workspace edits rather than cache and identifies the workspace", () =>
   withTempRoot((tempRoot) => {
@@ -2989,13 +3047,85 @@ it("check-budget reads GitHub workspace edits rather than cache and identifies t
     const expectedBlock =
       `Source: github:test-owner/test-repo@HEAD/rules/global/only.md\n\n` +
       fs.readFileSync(rulePath, "utf8");
-    expect(parsed.budget.totalTokens).toBe(countBudgetTokens(buildGlobalOutput([expectedBlock])));
+    const actualTokens = countBudgetTokens(buildGlobalOutput([expectedBlock]));
+    const canonicalBlock =
+      `Source: ${normalizePath(path.relative(path.join(os.tmpdir(), "agent-rules-budget-canonical"), rulePath))}\n\n` +
+      fs.readFileSync(rulePath, "utf8");
+    const canonicalTokens = countBudgetTokens(buildGlobalOutput([canonicalBlock]));
+    expect(parsed.budget.actualTokens).toBe(actualTokens);
+    expect(parsed.budget.canonicalTokens).toBe(canonicalTokens);
+    expect(parsed.budget.totalTokens).toBe(Math.max(actualTokens, canonicalTokens));
+    if (canonicalTokens > actualTokens) {
+      expect(parsed.budget.totalTokens).toBe(canonicalTokens);
+    }
     expect(parsed.budget.totalTokens).toBeGreaterThan(1000);
   }));
+
+itGitWorkspace(
+  "apply-rules blocks canonical 8001-token output even when actual provenance is lower",
+  () =>
+    withTempRoot((tempRoot) => {
+      const fixture = createGithubWorkspaceFixture(tempRoot);
+      fs.rmSync(path.join(fixture.workspaceRoot, "rules", "global", "only.md"));
+      writeGlobalRuleAtTokenCount(fixture.projectRoot, fixture.workspaceRoot, 8001);
+      const check = runCliStatus(["check-budget", "--json", "--root", fixture.projectRoot], {
+        cwd: repoRoot,
+        env: fixture.env
+      });
+      expect(check.status).toBe(1);
+      const report = JSON.parse(check.stdout).budget;
+      expect(report.canonicalTokens).toBe(8001);
+      expect(report.actualTokens).toBeLessThan(8001);
+      expect(report.totalTokens).toBe(8001);
+      const remoteBefore = getRemoteBranchSha(fixture);
+      const apply = runCliStatus(["apply-rules", "--root", fixture.projectRoot], {
+        cwd: repoRoot,
+        env: fixture.env
+      });
+      expect(apply.status).not.toBe(0);
+      expect(apply.stderr).toMatch(/Global rules hard budget exceeded/u);
+      expect(getRemoteBranchSha(fixture)).toBe(remoteBefore);
+      expect(fs.existsSync(path.join(fixture.projectRoot, "AGENTS.md"))).toBe(false);
+    })
+);
+
+itGitWorkspace("apply-rules pushes a clean canonical workspace at exactly 8000 tokens", () =>
+  withTempRoot((tempRoot) => {
+    const fixture = createGithubWorkspaceFixture(tempRoot);
+    fs.rmSync(path.join(fixture.workspaceRoot, "rules", "global", "only.md"));
+    writeGlobalRuleAtTokenCount(fixture.projectRoot, fixture.workspaceRoot, 8000);
+    runGit(["add", "."], { cwd: fixture.workspaceRoot, env: fixture.env });
+    runGit(["commit", "-m", "Set global rules at hard limit"], {
+      cwd: fixture.workspaceRoot,
+      env: {
+        ...fixture.env,
+        GIT_AUTHOR_NAME: "Test User",
+        GIT_AUTHOR_EMAIL: "test@example.com",
+        GIT_COMMITTER_NAME: "Test User",
+        GIT_COMMITTER_EMAIL: "test@example.com"
+      }
+    });
+    const apply = runCliStatus(["apply-rules", "--json", "--root", fixture.projectRoot], {
+      cwd: repoRoot,
+      env: fixture.env
+    });
+    expect(apply.status).toBe(0);
+    expect(JSON.parse(apply.stdout).editableBudget.totalTokens).toBe(8000);
+    expect(JSON.parse(apply.stdout).editableBudget.remainingTokens).toBe(0);
+    expect(getRemoteBranchSha(fixture)).toBe(
+      runGit(["rev-parse", "HEAD"], { cwd: fixture.workspaceRoot, env: fixture.env })
+    );
+  })
+);
 
 itGitWorkspace("apply-rules dry-run leaves Git refs, status, and generated files unchanged", () =>
   withTempRoot((tempRoot) => {
     const fixture = createGithubWorkspaceFixture(tempRoot);
+    pushRemoteCommitWithoutAdvancingLocalCanonical(fixture, "Remote advanced before dry-run");
+    const trackingBefore = runGit(["rev-parse", `refs/remotes/origin/${fixture.defaultBranch}`], {
+      cwd: fixture.workspaceRoot,
+      env: fixture.env
+    });
     const remoteBefore = getRemoteBranchSha(fixture);
     const headBefore = runGit(["rev-parse", "HEAD"], {
       cwd: fixture.workspaceRoot,
@@ -3005,6 +3135,22 @@ itGitWorkspace("apply-rules dry-run leaves Git refs, status, and generated files
       cwd: fixture.workspaceRoot,
       env: fixture.env
     });
+    const tracePath = path.join(tempRoot, "dry-run-git-trace.log");
+    fixture.env.GIT_TRACE = tracePath;
+    const repositoryOutputPaths = [
+      path.join(fixture.projectRoot, "AGENTS.md"),
+      path.join(fixture.projectRoot, "CLAUDE.md")
+    ];
+    const repositoryOutputContents = [
+      "existing repository instructions\n",
+      "existing Claude output\n"
+    ];
+    repositoryOutputPaths.forEach((filePath, index) =>
+      writeFile(filePath, repositoryOutputContents[index])
+    );
+    const globalOutputPath = path.join(fixture.home, ".codex", "AGENTS.md");
+    const globalOutputContent = "existing global instructions\n";
+    writeFile(globalOutputPath, globalOutputContent);
     const result = runCliStatus(
       ["apply-rules", "--dry-run", "--json", "--root", fixture.projectRoot],
       {
@@ -3021,10 +3167,67 @@ itGitWorkspace("apply-rules dry-run leaves Git refs, status, and generated files
     expect(
       runGit(["status", "--porcelain"], { cwd: fixture.workspaceRoot, env: fixture.env })
     ).toBe(statusBefore);
-    expect(fs.existsSync(path.join(fixture.projectRoot, "AGENTS.md"))).toBe(false);
-    expect(fs.existsSync(path.join(fixture.projectRoot, "CLAUDE.md"))).toBe(false);
-    expect(fs.existsSync(path.join(fixture.home, ".codex", "AGENTS.md"))).toBe(false);
+    expect(
+      runGit(["rev-parse", `refs/remotes/origin/${fixture.defaultBranch}`], {
+        cwd: fixture.workspaceRoot,
+        env: fixture.env
+      })
+    ).toBe(trackingBefore);
+    expect(repositoryOutputPaths.map((filePath) => fs.readFileSync(filePath, "utf8"))).toEqual(
+      repositoryOutputContents
+    );
+    expect(fs.readFileSync(globalOutputPath, "utf8")).toBe(globalOutputContent);
+    expect(fs.readFileSync(tracePath, "utf8")).not.toMatch(
+      /built-in: git (fetch|checkout|merge|push)/u
+    );
   })
+);
+
+itGitWorkspace("check-budget rejects a detached or non-canonical GitHub workspace", () =>
+  withTempRoot((tempRoot) => {
+    const fixture = createGithubWorkspaceFixture(tempRoot);
+    runGit(["switch", "-c", "task"], { cwd: fixture.workspaceRoot, env: fixture.env });
+    const wrongBranch = runCliStatus(["check-budget", "--json", "--root", fixture.projectRoot], {
+      cwd: repoRoot,
+      env: fixture.env
+    });
+    expect(wrongBranch.status).not.toBe(0);
+    expect(wrongBranch.stderr).toMatch(/non-canonical branch/u);
+    runGit(["switch", fixture.defaultBranch], { cwd: fixture.workspaceRoot, env: fixture.env });
+    runGit(["checkout", "--detach", "HEAD"], { cwd: fixture.workspaceRoot, env: fixture.env });
+    const detached = runCliStatus(["check-budget", "--json", "--root", fixture.projectRoot], {
+      cwd: repoRoot,
+      env: fixture.env
+    });
+    expect(detached.status).not.toBe(0);
+    expect(detached.stderr).toMatch(/detached HEAD/u);
+  })
+);
+
+itGitWorkspace(
+  "check-budget rejects a GitHub workspace that does not match its configured ref",
+  () =>
+    withTempRoot((tempRoot) => {
+      const fixture = createGithubWorkspaceFixture(tempRoot);
+      const rulesetPath = path.join(fixture.projectRoot, "agent-ruleset.json");
+      writeFile(
+        rulesetPath,
+        JSON.stringify(
+          { sources: ["github:test-owner/test-repo@missing-ref"], profile: BASE_PROFILE },
+          null,
+          2
+        )
+      );
+      const result = runCliStatus(["check-budget", "--json", "--root", fixture.projectRoot], {
+        cwd: repoRoot,
+        env: fixture.env
+      });
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toMatch(/not match configured ref|Needed a single revision/u);
+      expect(runGit(["rev-parse", "--abbrev-ref", "HEAD"], { cwd: fixture.workspaceRoot })).toBe(
+        fixture.defaultBranch
+      );
+    })
 );
 
 itGitWorkspace("apply-rules rejects an over-budget GitHub workspace before pushing", () =>
@@ -3179,6 +3382,56 @@ itGitWorkspace("apply-rules preflights every source before pushing any GitHub so
     expect(getRemoteBranchSha(first)).toBe(remoteBefore);
     expect(getRemoteBranchSha(second)).toBe(secondRemoteBefore);
     expect(fs.existsSync(path.join(first.projectRoot, "AGENTS.md"))).toBe(false);
+  })
+);
+
+itGitWorkspace("apply-rules remeasures all fast-forwards before pushing any source", () =>
+  withTempRoot((tempRoot) => {
+    const firstRoot = path.join(tempRoot, "first");
+    const secondRoot = path.join(tempRoot, "second");
+    const first = createGithubWorkspaceFixture(firstRoot);
+    const second = createGithubWorkspaceFixture(secondRoot);
+    const rulesetPath = path.join(first.projectRoot, "agent-ruleset.json");
+    const ruleset = JSON.parse(fs.readFileSync(rulesetPath, "utf8"));
+    const renamedWorkspace = path.join(
+      first.home,
+      ".agentsmd",
+      "workspace",
+      "other-owner",
+      "test-repo"
+    );
+    fs.mkdirSync(path.dirname(renamedWorkspace), { recursive: true });
+    fs.renameSync(second.workspaceRoot, renamedWorkspace);
+    runGit(["remote", "set-url", "origin", second.bareRoot], { cwd: renamedWorkspace });
+    ruleset.sources.push("github:other-owner/test-repo");
+    writeFile(rulesetPath, JSON.stringify(ruleset, null, 2));
+    const secondConfig = path.join(first.home, "gitconfig-multi");
+    writeFile(
+      secondConfig,
+      `[url "${first.bareRoot.replace(/\\/gu, "/")}"]\n\tinsteadOf = https://github.com/test-owner/test-repo.git\n` +
+        `[url "${second.bareRoot.replace(/\\/gu, "/")}"]\n\tinsteadOf = https://github.com/other-owner/test-repo.git\n`
+    );
+    const cliEnv = { ...first.env, GIT_CONFIG_GLOBAL: secondConfig };
+    const firstRemoteBefore = getRemoteBranchSha(first);
+    prepareRemoteWriter(second);
+    commitFile(
+      second.seedRoot,
+      "rules/global/only.md",
+      `# Remote growth\n${" x".repeat(10000)}`,
+      second.env
+    );
+    runGit(["push", "origin", second.defaultBranch], { cwd: second.seedRoot, env: second.env });
+    const secondRemoteBefore = getRemoteBranchSha(second);
+    const result = runCliStatus(["apply-rules", "--root", first.projectRoot], {
+      cwd: repoRoot,
+      env: cliEnv
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/Global rules hard budget exceeded/u);
+    expect(getRemoteBranchSha(first)).toBe(firstRemoteBefore);
+    expect(getRemoteBranchSha(second)).toBe(secondRemoteBefore);
+    expect(fs.existsSync(path.join(first.projectRoot, "AGENTS.md"))).toBe(false);
+    expect(fs.existsSync(path.join(first.projectRoot, "CLAUDE.md"))).toBe(false);
   })
 );
 

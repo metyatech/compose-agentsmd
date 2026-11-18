@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import readline from "node:readline";
 import { Ajv, type ErrorObject } from "ajv";
@@ -556,10 +557,10 @@ const resolveRemoteDefaultBranch = (workspaceRoot: string): string => {
 
 const getLatestWorkspaceIdentity = (
   source: string,
-  workspaceRoot: string
+  workspaceRoot: string,
+  allowDirty = false
 ): LatestWorkspaceIdentity => {
-  const dirty = execGit(["status", "--porcelain"], workspaceRoot) !== "";
-  if (dirty) {
+  if (!allowDirty && execGit(["status", "--porcelain"], workspaceRoot) !== "") {
     throw new Error(`Workspace has uncommitted changes: ${workspaceRoot}`);
   }
 
@@ -802,54 +803,8 @@ const ensureLatestWorkspaceForEdit = (source: string): string => {
   return workspaceRoot;
 };
 
-const prepareLatestWorkspaceForApply = (source: string, workspaceRoot: string): void => {
-  const identity = getLatestWorkspaceIdentity(source, workspaceRoot);
-  const canonicalBranch = identity.canonicalBranch;
-  execGit(["fetch", "origin"], workspaceRoot);
-  if (identity.branchState !== "canonical") {
-    throw new Error(
-      `Workspace is on non-canonical branch:\n${identity.currentBranch}\nExpected:\n${canonicalBranch}`
-    );
-  }
-
-  const sync = getLatestWorkspaceSync(workspaceRoot, canonicalBranch);
-  if (sync.state === "diverged") {
-    throw new Error(
-      `Workspace branch has diverged from origin/${canonicalBranch}: ${workspaceRoot}`
-    );
-  }
-  if (sync.state === "behind_fast_forwardable") {
-    execGit(["merge", "--ff-only", `origin/${canonicalBranch}`], workspaceRoot);
-  }
-  execGit(["push", "origin", `HEAD:${canonicalBranch}`], workspaceRoot);
-};
-
-const applyRulesFromWorkspace = (source: string): void => {
-  if (!source.startsWith("github:")) {
-    return;
-  }
-
-  const workspaceRoot = ensureWorkspaceForGithubSource(source);
-  const parsed = parseGithubSource(source);
-  if (parsed.ref === "latest") {
-    prepareLatestWorkspaceForApply(source, workspaceRoot);
-    return;
-  }
-
-  const status = execGit(["status", "--porcelain"], workspaceRoot);
-  if (status) {
-    throw new Error(`Workspace has uncommitted changes: ${workspaceRoot}`);
-  }
-
-  const branch = execGit(["rev-parse", "--abbrev-ref", "HEAD"], workspaceRoot);
-  if (branch === "HEAD") {
-    throw new Error(`Workspace is in detached HEAD state: ${workspaceRoot}`);
-  }
-
-  execGit(["push"], workspaceRoot);
-};
-
-const validateAllWorkspacesBeforeApply = (sources: string[]): void => {
+const prepareAllSourcesBeforePush = (sources: string[]): Map<string, string> => {
+  const preparedBranches = new Map<string, string>();
   for (const source of sources) {
     if (!source.startsWith("github:")) {
       continue;
@@ -868,12 +823,16 @@ const validateAllWorkspacesBeforeApply = (sources: string[]): void => {
           `Workspace is on non-canonical branch:\n${identity.currentBranch}\nExpected:\n${identity.canonicalBranch}`
         );
       }
+      preparedBranches.set(source, identity.canonicalBranch);
       execGit(["fetch", "origin"], workspaceRoot);
       const sync = getLatestWorkspaceSync(workspaceRoot, identity.canonicalBranch);
       if (sync.state === "diverged") {
         throw new Error(
           `Workspace branch has diverged from origin/${identity.canonicalBranch}: ${workspaceRoot}`
         );
+      }
+      if (sync.state === "behind_fast_forwardable") {
+        execGit(["merge", "--ff-only", `origin/${identity.canonicalBranch}`], workspaceRoot);
       }
       continue;
     }
@@ -887,6 +846,60 @@ const validateAllWorkspacesBeforeApply = (sources: string[]): void => {
     }
     execGit(["fetch", "--all"], workspaceRoot);
     execGit(["rev-parse", "--verify", `${parsed.ref}^{commit}`], workspaceRoot);
+    execGit(["checkout", parsed.ref], workspaceRoot);
+  }
+  return preparedBranches;
+};
+
+const pushPreparedSources = (sources: string[], preparedBranches: Map<string, string>): void => {
+  for (const source of sources) {
+    if (!source.startsWith("github:")) continue;
+    const parsed = parseGithubSource(source);
+    const workspaceRoot = path.join(DEFAULT_WORKSPACE_ROOT, parsed.owner, parsed.repo);
+    if (parsed.ref === "latest") {
+      const branch = preparedBranches.get(source);
+      if (!branch) {
+        throw new Error(`Workspace was not prepared before push: ${workspaceRoot}`);
+      }
+      execGit(["push", "origin", `HEAD:${branch}`], workspaceRoot);
+    } else {
+      execGit(["push"], workspaceRoot);
+    }
+  }
+};
+
+const captureEditableSourceState = (sources: EditableSourceSnapshot[]): string => {
+  const state: Array<{ path: string; hash: string }> = [];
+  for (const source of sources) {
+    const paths = [path.join(source.sourceRoot, "agent-profiles.json")];
+    const globalRoot = path.join(source.rulesRoot, "global");
+    if (isExistingDirectory(globalRoot)) {
+      paths.push(...collectMarkdownFiles(globalRoot));
+    }
+    for (const filePath of paths.sort()) {
+      if (!fs.existsSync(filePath)) {
+        state.push({ path: filePath, hash: "missing" });
+        continue;
+      }
+      state.push({
+        path: filePath,
+        hash: createHash("sha256").update(fs.readFileSync(filePath)).digest("hex")
+      });
+    }
+  }
+  return JSON.stringify(state);
+};
+
+const assertPreparedWorkspacesClean = (sources: EditableSourceSnapshot[]): void => {
+  for (const source of sources) {
+    if (
+      source.source.startsWith("github:") &&
+      execGit(["status", "--porcelain"], source.sourceRoot)
+    ) {
+      throw new Error(
+        `Editable source changed during final budget preflight; no workspaces were pushed: ${source.sourceRoot}`
+      );
+    }
   }
 };
 
@@ -900,11 +913,16 @@ type SourceContext = {
 };
 
 type EditableSourceSnapshot = SourceContext;
+type EditableBudgetStatus = BudgetStatus & {
+  actualTokens: number;
+  canonicalTokens: number;
+};
 
 const resolveEditableSources = (
   rulesetDir: string,
   sources: string[],
-  mode: "prepared-by-edit" | "read-only"
+  mode: "prepared-by-edit" | "read-only",
+  allowDetachedConfiguredRef = false
 ): EditableSourceSnapshot[] =>
   sources.map((source) => {
     if (!source.startsWith("github:")) {
@@ -924,6 +942,31 @@ const resolveEditableSources = (
       ensureDirectoryExists(workspaceRoot);
       if (!fs.existsSync(path.join(workspaceRoot, ".git"))) {
         throw new Error(`GitHub source workspace is not a Git checkout: ${workspaceRoot}`);
+      }
+      let branch: string;
+      if (parsed.ref === "latest") {
+        const identity = getLatestWorkspaceIdentity(source, workspaceRoot, true);
+        branch = identity.currentBranch;
+        if (identity.branchState !== "canonical") {
+          throw new Error(
+            `Workspace is on non-canonical branch:\n${identity.currentBranch}\nExpected:\n${identity.canonicalBranch}`
+          );
+        }
+      } else {
+        branch = execGit(["rev-parse", "--abbrev-ref", "HEAD"], workspaceRoot);
+        if (branch === "HEAD" && !allowDetachedConfiguredRef) {
+          throw new Error(`GitHub source workspace is in detached HEAD state: ${workspaceRoot}`);
+        }
+        const refCommit = execGit(
+          ["rev-parse", "--verify", `${parsed.ref}^{commit}`],
+          workspaceRoot
+        );
+        const head = execGit(["rev-parse", "HEAD"], workspaceRoot);
+        if (branch !== parsed.ref && head !== refCommit) {
+          throw new Error(
+            `GitHub source workspace does not match configured ref ${parsed.ref}: ${workspaceRoot}`
+          );
+        }
       }
     }
     const rulesRoot = path.join(workspaceRoot, "rules");
@@ -1201,21 +1244,38 @@ const collectRepositoryParts = (
   return parts;
 };
 
-const measureEditableGlobalBudget = (
+const measureEffectiveBudget = (
   projectRuleset: ProjectRuleset,
   rulesetDir: string,
   sources: EditableSourceSnapshot[]
-): BudgetStatus => {
+): EditableBudgetStatus => {
   const contexts: SourceContext[] = sources.map((source) => ({ ...source }));
   // Profile/domain validation is part of source validity even though this command
   // only counts global rules.
   collectRepositoryParts(contexts, projectRuleset.profile, rulesetDir);
-  return withBudgetStatus(
-    buildBudgetCheckResult(collectGlobalParts(contexts, rulesetDir), projectRuleset)
+  const actual = buildBudgetCheckResult(collectGlobalParts(contexts, rulesetDir), projectRuleset);
+  const canonicalRoot = path.join(os.tmpdir(), "agent-rules-budget-canonical");
+  const canonicalContexts = contexts.map((context) => ({
+    ...context,
+    source: context.sourceRoot
+  }));
+  const canonical = buildBudgetCheckResult(
+    collectGlobalParts(canonicalContexts, canonicalRoot),
+    projectRuleset
   );
+  const totalTokens = Math.max(actual.totalTokens, canonical.totalTokens);
+  return {
+    ...withBudgetStatus({
+      ...actual,
+      totalTokens,
+      totalExceeded: totalTokens > actual.totalBudget
+    }),
+    actualTokens: actual.totalTokens,
+    canonicalTokens: canonical.totalTokens
+  };
 };
 
-const enforceHardBudgetBeforeApply = (report: BudgetStatus): void => {
+const revalidateAndEnforceBeforePush = (report: EditableBudgetStatus): void => {
   if (report.totalExceeded) {
     throw new Error(
       `Global rules hard budget exceeded (${report.tokenizer}): ` +
@@ -1409,10 +1469,11 @@ const emitBudgetReport = (args: CliArgs, budgetResult: BudgetCheckResult): void 
   }
 };
 
-const formatEditableBudgetStatus = (report: BudgetStatus): string => {
+const formatEditableBudgetStatus = (report: EditableBudgetStatus): string => {
   const softStatus = report.softTargetExceeded ? "above advisory target" : "within advisory target";
   const lines = [
     `Global rules budget (${report.tokenizer}): ${report.totalTokens}/${report.totalBudget} tokens; ${report.remainingTokens} remaining.`,
+    `Effective count is max(actual provenance ${report.actualTokens}, canonical local-test provenance ${report.canonicalTokens}).`,
     `Soft operating target: ${report.softTargetTokens} tokens (${softStatus}); reserved headroom: ${report.reserveTokens} tokens.`
   ];
   if (report.remainingTokens === 0) {
@@ -1426,11 +1487,15 @@ const formatEditableBudgetStatus = (report: BudgetStatus): string => {
   return `${lines.join("\n")}\n`;
 };
 
-const runCheckBudget = (rulesetPath: string, args: CliArgs, rootDir: string): BudgetStatus => {
+const runCheckBudget = (
+  rulesetPath: string,
+  args: CliArgs,
+  rootDir: string
+): EditableBudgetStatus => {
   const ruleset = readProjectRuleset(rulesetPath);
   const rulesetDir = path.dirname(rulesetPath);
   const sources = resolveEditableSources(rulesetDir, ruleset.sources, "read-only");
-  const budget = measureEditableGlobalBudget(ruleset, rulesetDir, sources);
+  const budget = measureEffectiveBudget(ruleset, rulesetDir, sources);
   const workspacePaths = sources.map((source) => ({
     source: source.source,
     path: source.sourceRoot
@@ -1730,7 +1795,7 @@ const runCheck = (rulesetPath: string, rootDir: string, args: CliArgs): void => 
 
 const printEditRulesGuidance = (
   sources: EditableSourceSnapshot[],
-  budget: BudgetStatus,
+  budget: EditableBudgetStatus,
   args: CliArgs
 ): void => {
   const workspacePaths = sources.map((source) => ({
@@ -1804,7 +1869,7 @@ const main = async (): Promise<void> => {
     const rulesetDir = path.dirname(rulesetPath);
     const ruleset = readProjectRuleset(rulesetPath);
     const sources = resolveEditableSources(rulesetDir, ruleset.sources, "prepared-by-edit");
-    const budget = measureEditableGlobalBudget(ruleset, rulesetDir, sources);
+    const budget = measureEffectiveBudget(ruleset, rulesetDir, sources);
     printEditRulesGuidance(sources, budget, args);
     return;
   }
@@ -1831,8 +1896,8 @@ const main = async (): Promise<void> => {
     const ruleset = readProjectRuleset(rulesetPath);
     const rulesetDir = path.dirname(rulesetPath);
     const editableSources = resolveEditableSources(rulesetDir, ruleset.sources, "read-only");
-    const budgetStatus = measureEditableGlobalBudget(ruleset, rulesetDir, editableSources);
-    enforceHardBudgetBeforeApply(budgetStatus);
+    const budgetStatus = measureEffectiveBudget(ruleset, rulesetDir, editableSources);
+    revalidateAndEnforceBeforePush(budgetStatus);
 
     if (args.dryRun) {
       const output = composeRuleset(rulesetPath, rootDir, {
@@ -1840,10 +1905,7 @@ const main = async (): Promise<void> => {
         sourceContexts: editableSources,
         measureEditableBudget: true
       });
-      const editableBudget = buildBudgetCheckResult(
-        collectGlobalParts(editableSources, rulesetDir),
-        ruleset
-      );
+      const editableBudget = budgetStatus;
       if (args.json) {
         process.stdout.write(
           JSON.stringify(
@@ -1867,11 +1929,18 @@ const main = async (): Promise<void> => {
       return;
     }
 
-    validateAllWorkspacesBeforeApply(ruleset.sources);
-
-    for (const source of ruleset.sources) {
-      applyRulesFromWorkspace(source);
+    const preparedBranches = prepareAllSourcesBeforePush(ruleset.sources);
+    const finalSources = resolveEditableSources(rulesetDir, ruleset.sources, "read-only", true);
+    const sourceStateBeforeMeasurement = captureEditableSourceState(finalSources);
+    const finalBudget = measureEffectiveBudget(ruleset, rulesetDir, finalSources);
+    revalidateAndEnforceBeforePush(finalBudget);
+    assertPreparedWorkspacesClean(finalSources);
+    if (sourceStateBeforeMeasurement !== captureEditableSourceState(finalSources)) {
+      throw new Error(
+        "Editable source changed during final budget preflight; no workspaces were pushed."
+      );
     }
+    pushPreparedSources(ruleset.sources, preparedBranches);
 
     const output = composeRuleset(rulesetPath, rootDir, {
       refresh: true,
@@ -1887,7 +1956,7 @@ const main = async (): Promise<void> => {
             changes: output.outputChanges,
             dryRun: !!args.dryRun,
             budget: output.budgetResult,
-            editableBudget: budgetStatus
+            editableBudget: finalBudget
           },
           null,
           2
@@ -1897,7 +1966,7 @@ const main = async (): Promise<void> => {
       process.stdout.write(formatComposedOutputs(output));
       printOutputDiffs(output);
       emitBudgetReport(args, output.budgetResult);
-      process.stdout.write(formatEditableBudgetStatus(budgetStatus));
+      process.stdout.write(formatEditableBudgetStatus(finalBudget));
     }
     return;
   }
