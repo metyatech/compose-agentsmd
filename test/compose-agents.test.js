@@ -2073,26 +2073,46 @@ it("apply-rules composes with refresh for local source", () =>
     const projectRoot = path.join(tempRoot, "project");
     const sourceRoot = path.join(tempRoot, "rules-source");
     const rulesRoot = path.join(sourceRoot, "rules");
+    const rulesetPath = path.join(projectRoot, "agent-ruleset.json");
+    const sourceRulePath = path.join(rulesRoot, "global", "only.md");
 
     writeBaseSource(sourceRoot);
     writeFile(
-      path.join(projectRoot, "agent-ruleset.json"),
+      rulesetPath,
       JSON.stringify(
-        { sources: [relSource(projectRoot, sourceRoot)], profile: BASE_PROFILE },
+        { sources: [relSource(projectRoot, sourceRoot)], profile: BASE_PROFILE, global: false },
         null,
         2
       )
     );
+    const rulesetBytes = fs.readFileSync(rulesetPath);
+    const sourceRuleBytes = fs.readFileSync(sourceRulePath);
 
-    runCli(["apply-rules", "--root", projectRoot], { cwd: repoRoot, env: cliEnv });
+    const result = runCliStatus(["apply-rules", "--root", projectRoot], {
+      cwd: repoRoot,
+      env: cliEnv
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr.match(/Deprecated ruleset key "global"/gu)).toHaveLength(1);
+    expect(result.stdout.trimStart()).not.toMatch(/^\{/u);
 
     const output = fs.readFileSync(path.join(projectRoot, "AGENTS.md"), "utf8");
     expect(output).toBe(withToolRules(""));
-    expect(fs.readFileSync(path.join(fakeHome, ".codex", "AGENTS.md"), "utf8")).toBe(
-      withComposedHeader(
-        formatRuleBlock(path.join(rulesRoot, "global", "only.md"), "# Only\n1", projectRoot) + "\n"
-      )
+    expect(fs.readFileSync(path.join(projectRoot, "CLAUDE.md"), "utf8")).toBe("@AGENTS.md\n");
+    const expectedGlobalOutput = withComposedHeader(
+      formatRuleBlock(sourceRulePath, "# Only\n1", projectRoot) + "\n"
     );
+    const globalOutputPaths = DEFAULT_GLOBAL_OUTPUTS.map((target) =>
+      path.join(fakeHome, target.slice(2).replace(/\//gu, path.sep))
+    );
+    expect(globalOutputPaths).toHaveLength(5);
+    for (const globalOutputPath of globalOutputPaths) {
+      expect(globalOutputPath.startsWith(`${fakeHome}${path.sep}`)).toBe(true);
+      expect(fs.existsSync(globalOutputPath)).toBe(true);
+      expect(fs.readFileSync(globalOutputPath, "utf8")).toBe(expectedGlobalOutput);
+    }
+    expect(fs.readFileSync(rulesetPath)).toEqual(rulesetBytes);
+    expect(fs.readFileSync(sourceRulePath)).toEqual(sourceRuleBytes);
   }));
 
 it("apply-rules supports --json output", () =>
