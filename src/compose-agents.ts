@@ -44,7 +44,6 @@ type CliArgs = {
   clearCache?: boolean;
   profile?: string;
   output?: string;
-  global?: boolean;
   compose?: boolean;
   dryRun?: boolean;
   yes?: boolean;
@@ -164,11 +163,6 @@ const parseArgs = (argv: string[]): CliArgs => {
       continue;
     }
 
-    if (arg === "--no-global") {
-      args.global = false;
-      continue;
-    }
-
     if (arg === "--compose") {
       args.compose = true;
       continue;
@@ -218,6 +212,8 @@ const rulesetSchema = JSON.parse(fs.readFileSync(RULESET_SCHEMA_PATH, "utf8"));
 const TOOL_RULES = normalizeTrailingWhitespace(fs.readFileSync(TOOL_RULES_PATH, "utf8"));
 const ajv = new Ajv({ allErrors: true, strict: false });
 const validateRulesetSchema = ajv.compile(rulesetSchema);
+const warnedLegacyGlobalRulesets = new Set<string>();
+let quietLegacyWarnings = false;
 
 const formatSchemaErrors = (errors: ErrorObject[] | null | undefined): string => {
   if (!errors || errors.length === 0) {
@@ -368,7 +364,6 @@ const readJsonFile = (filePath: string): unknown => {
 type ProjectRuleset = {
   sources: string[];
   profile: string;
-  global?: boolean;
   output?: string;
   claude?: {
     enabled?: boolean;
@@ -382,13 +377,31 @@ type ProjectRuleset = {
 
 const readProjectRuleset = (rulesetPath: string): ProjectRuleset => {
   const parsed = readJsonFile(rulesetPath);
-  const isValid = validateRulesetSchema(parsed);
+  let canonicalInput = parsed;
+  if (
+    parsed !== null &&
+    typeof parsed === "object" &&
+    !Array.isArray(parsed) &&
+    Object.hasOwn(parsed, "global") &&
+    typeof (parsed as Record<string, unknown>).global === "boolean"
+  ) {
+    const { global: _legacyGlobal, ...withoutLegacyGlobal } = parsed as Record<string, unknown>;
+    canonicalInput = withoutLegacyGlobal;
+    const absoluteRulesetPath = path.resolve(rulesetPath);
+    if (!quietLegacyWarnings && !warnedLegacyGlobalRulesets.has(absoluteRulesetPath)) {
+      warnedLegacyGlobalRulesets.add(absoluteRulesetPath);
+      process.stderr.write(
+        `Deprecated ruleset key "global" in ${normalizePath(rulesetPath)} is ignored; remove it. User-global rules are always generated. Remove --no-global from command invocations before upgrading.\n`
+      );
+    }
+  }
+  const isValid = validateRulesetSchema(canonicalInput);
   if (!isValid) {
     const message = formatSchemaErrors(validateRulesetSchema.errors);
     throw new Error(`Invalid ruleset schema in ${rulesetPath}: ${message}`);
   }
 
-  const ruleset = parsed as ProjectRuleset;
+  const ruleset = canonicalInput as ProjectRuleset;
   if (ruleset.output === undefined) {
     ruleset.output = DEFAULT_OUTPUT;
   }
@@ -401,10 +414,6 @@ const readProjectRuleset = (rulesetPath: string): ProjectRuleset => {
   if (ruleset.claude.output === undefined) {
     ruleset.claude.output = DEFAULT_CLAUDE_OUTPUT;
   }
-  if (ruleset.global === undefined) {
-    ruleset.global = true;
-  }
-
   return ruleset;
 };
 
@@ -462,7 +471,6 @@ type ComposeOptions = {
   dryRun?: boolean;
   inspectGlobalOutputs?: boolean;
   sourceContexts?: SourceContext[];
-  measureEditableBudget?: boolean;
 };
 
 type OutputScope = "repository" | "global";
@@ -1040,7 +1048,7 @@ const resolveOutputPaths = (
   const claude = projectRuleset.claude ?? {};
   const companionEnabled = claude.enabled !== false;
   const configuredCompanionPath = resolveFrom(rulesetDir, claude.output ?? DEFAULT_CLAUDE_OUTPUT);
-  const globalOutputPaths = projectRuleset.global === false ? [] : getGlobalOutputPaths();
+  const globalOutputPaths = getGlobalOutputPaths();
 
   if (
     !companionEnabled ||
@@ -1301,8 +1309,7 @@ const composeRuleset = (
     options.sourceContexts ??
     resolveSourceContexts(rulesetDir, projectRuleset.sources, options.refresh ?? false);
 
-  const globalParts =
-    projectRuleset.global !== false ? collectGlobalParts(sourceContexts, rulesetDir) : [];
+  const globalParts = collectGlobalParts(sourceContexts, rulesetDir);
   const repositoryParts = collectRepositoryParts(
     sourceContexts,
     projectRuleset.profile,
@@ -1313,11 +1320,7 @@ const composeRuleset = (
   const globalContentParts = globalParts.map((part) => part.content);
   const primaryOutputContent = buildInstructionContent(repositoryContentParts, true);
   const globalOutputContent = buildInstructionContent(globalContentParts, false);
-  const budgetParts =
-    options.measureEditableBudget || projectRuleset.global !== false
-      ? collectGlobalParts(sourceContexts, rulesetDir)
-      : globalParts;
-  const budgetResult = buildBudgetCheckResult(budgetParts, projectRuleset);
+  const budgetResult = buildBudgetCheckResult(globalParts, projectRuleset);
   const repositoryOutputs: string[] = [toDisplayPath(rootDir, primaryOutputPath)];
   const globalOutputs = globalOutputPaths.map((filePath) => toDisplayPath(rootDir, filePath));
   const repositoryFiles: RepositoryComposedFile[] = [
@@ -1541,10 +1544,6 @@ const buildInitRuleset = (args: CliArgs): ProjectRuleset => {
     }
   };
 
-  if (args.global === false) {
-    ruleset.global = false;
-  }
-
   return ruleset;
 };
 
@@ -1559,11 +1558,6 @@ const formatInitRuleset = (ruleset: ProjectRuleset): string => {
     "  // Profile name defined by a source's agent-profiles.json.",
     `  "profile": "${ruleset.profile}",`
   ];
-
-  if (ruleset.global === false) {
-    lines.push("  // Write shared global rules to user-level instruction files.");
-    lines.push('  "global": false,');
-  }
 
   lines.push("  // Claude Code companion output settings.");
   lines.push('  "claude": {');
@@ -1830,6 +1824,7 @@ const printEditRulesGuidance = (
 
 const main = async (): Promise<void> => {
   const args = parseArgs(process.argv.slice(2));
+  quietLegacyWarnings = args.quiet ?? false;
 
   if (args.version) {
     process.stdout.write(`${getVersion()}\n`);
@@ -1902,8 +1897,7 @@ const main = async (): Promise<void> => {
     if (args.dryRun) {
       const output = composeRuleset(rulesetPath, rootDir, {
         dryRun: true,
-        sourceContexts: editableSources,
-        measureEditableBudget: true
+        sourceContexts: editableSources
       });
       const editableBudget = budgetStatus;
       if (args.json) {

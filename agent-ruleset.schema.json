@@ -17,10 +17,6 @@
       "type": "string",
       "minLength": 1
     },
-    "global": {
-      "type": "boolean",
-      "description": "Write rules/global to user-global instruction files."
-    },
     "output": {
       "type": "string",
       "minLength": 1

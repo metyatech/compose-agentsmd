@@ -1,4 +1,4 @@
-Usage: compose-agentsmd [edit-rules|check-budget|apply-rules|init|check] [--root <path>] [--ruleset <path>] [--ruleset-name <name>] [--profile <name>] [--output <file>] [--no-global] [--compose] [--dry-run] [--yes] [--force] [--refresh] [--clear-cache] [--version|-V] [--verbose|-v] [--quiet|-q] [--json] [--help|-h]
+Usage: compose-agentsmd [edit-rules|check-budget|apply-rules|init|check] [--root <path>] [--ruleset <path>] [--ruleset-name <name>] [--profile <name>] [--output <file>] [--compose] [--dry-run] [--yes] [--force] [--refresh] [--clear-cache] [--version|-V] [--verbose|-v] [--quiet|-q] [--json] [--help|-h]
 
 Commands:
   (default)            Compose instruction files from the ruleset
@@ -19,7 +19,6 @@ Options:
   --ruleset-name <name> Ruleset filename in the project root (default: agent-ruleset.json)
   --profile <name>     Profile name for init (default: node-cli)
   --output <file>      Repository output filename for init (default: AGENTS.md)
-  --no-global          Initialize without user-global rules
   --compose            Compose repository and user-global instruction files after init
   --dry-run            Show plan without writing files; apply-rules also performs no Git mutation
   --yes                Skip init confirmation prompt

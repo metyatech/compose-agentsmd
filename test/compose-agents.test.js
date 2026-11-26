@@ -5,6 +5,7 @@ import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { countTokens } from "gpt-tokenizer";
+import Ajv from "ajv";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1187,45 +1188,191 @@ it("does not search for rulesets in subdirectories", () =>
     );
   }));
 
-it("supports global=false to skip global rules", () =>
+it.each([
+  ["omitted", undefined],
+  ["false", false],
+  ["true", true]
+])(
+  "always generates all user-global outputs when legacy global is %s",
+  (_label, legacyGlobal) =>
+    withTempRoot((tempRoot) => {
+      const fakeHome = path.join(tempRoot, "home");
+      const cliEnv = createCliEnv(fakeHome);
+      const projectRoot = path.join(tempRoot, "project");
+      const sourceRoot = path.join(tempRoot, "rules-source");
+      const rulesRoot = path.join(sourceRoot, "rules");
+      const rulesetPath = path.join(projectRoot, "agent-ruleset.json");
+
+      writeProfileManifest(sourceRoot, { p: { domains: ["node"] } });
+      writeFile(path.join(rulesRoot, "global", "only.md"), "# Only Global\n1");
+      writeFile(path.join(rulesRoot, "domains", "node", "domain.md"), "# Domain\nD");
+      const ruleset = { sources: [relSource(projectRoot, sourceRoot)], profile: "p" };
+      if (legacyGlobal !== undefined) ruleset.global = legacyGlobal;
+      writeFile(rulesetPath, JSON.stringify(ruleset, null, 2));
+      const rulesetBytes = fs.readFileSync(rulesetPath);
+      const sourceBytes = fs.readFileSync(path.join(rulesRoot, "global", "only.md"));
+      const expectedGlobalOutput = withComposedHeader(
+        formatRuleBlock(
+          path.join(rulesRoot, "global", "only.md"),
+          "# Only Global\n1",
+          projectRoot
+        ) + "\n"
+      );
+      const absoluteGlobalPaths = DEFAULT_GLOBAL_OUTPUTS.map((target) =>
+        path.join(fakeHome, target.slice(2).replace(/\//gu, path.sep))
+      );
+      absoluteGlobalPaths.forEach((globalPath) => writeFile(globalPath, "stale global content\n"));
+
+      const first = runCliStatus(["--json", "--root", projectRoot], { cwd: repoRoot, env: cliEnv });
+      expect(first.status, first.stderr).toBe(0);
+      const firstJson = JSON.parse(first.stdout);
+      expect(firstJson.globalOutputs).toEqual(DEFAULT_GLOBAL_OUTPUTS);
+      expect(firstJson.changes).toHaveLength(7);
+      expect(firstJson.changes.map(({ target, status }) => [target, status])).toEqual([
+        ["AGENTS.md", "updated"],
+        ["CLAUDE.md", "updated"],
+        ...DEFAULT_GLOBAL_OUTPUTS.map((target) => [target, "updated"])
+      ]);
+      expect(firstJson.budget).toEqual(
+        buildExpectedBudget([
+          formatRuleBlock(
+            path.join(rulesRoot, "global", "only.md"),
+            "# Only Global\n1",
+            projectRoot
+          )
+        ])
+      );
+      for (const globalPath of absoluteGlobalPaths) {
+        expect(fs.readFileSync(globalPath, "utf8")).toBe(expectedGlobalOutput);
+      }
+      expect(fs.readFileSync(rulesetPath)).toEqual(rulesetBytes);
+      expect(fs.readFileSync(path.join(rulesRoot, "global", "only.md"))).toEqual(sourceBytes);
+      if (legacyGlobal === undefined) {
+        expect(first.stderr).toBe("");
+      } else {
+        expect(first.stderr.match(/Deprecated ruleset key "global"/gu)).toHaveLength(1);
+        expect(first.stderr).toContain("is ignored; remove it");
+        expect(first.stderr).toContain("User-global rules are always generated");
+      }
+
+      const second = runCliStatus(["--json", "--root", projectRoot], {
+        cwd: repoRoot,
+        env: cliEnv
+      });
+      expect(second.status, second.stderr).toBe(0);
+      const secondJson = JSON.parse(second.stdout);
+      expect(secondJson.globalOutputs).toEqual(DEFAULT_GLOBAL_OUTPUTS);
+      expect(secondJson.changes).toHaveLength(7);
+      expect(secondJson.changes.every(({ status }) => status === "unchanged")).toBe(true);
+      expect(second.stderr.match(/Deprecated ruleset key "global"/gu) ?? []).toHaveLength(
+        legacyGlobal === undefined ? 0 : 1
+      );
+      const quiet = runCliStatus(["--quiet", "--json", "--root", projectRoot], {
+        cwd: repoRoot,
+        env: cliEnv
+      });
+      expect(quiet.status, quiet.stderr).toBe(0);
+      expect(quiet.stderr).toBe("");
+      expect(fs.readFileSync(rulesetPath)).toEqual(rulesetBytes);
+    }),
+  15000
+);
+
+it("keeps legacy global-false dry runs read-only while planning all five global updates", () =>
   withTempRoot((tempRoot) => {
     const fakeHome = path.join(tempRoot, "home");
     const cliEnv = createCliEnv(fakeHome);
     const projectRoot = path.join(tempRoot, "project");
-    const sourceRoot = path.join(tempRoot, "rules-source");
+    const sourceRoot = path.join(tempRoot, "source");
     const rulesRoot = path.join(sourceRoot, "rules");
-
-    writeProfileManifest(sourceRoot, { p: { domains: ["node"] } });
-    writeFile(path.join(rulesRoot, "global", "only.md"), "# Only Global\n1");
-    writeFile(path.join(rulesRoot, "domains", "node", "domain.md"), "# Domain\nD");
-
+    const rulesetPath = path.join(projectRoot, "agent-ruleset.json");
+    writeBaseSource(sourceRoot);
+    writeFile(path.join(rulesRoot, "global", "only.md"), "# Legacy\nA");
     writeFile(
-      path.join(projectRoot, "agent-ruleset.json"),
-      JSON.stringify(
-        { sources: [relSource(projectRoot, sourceRoot)], profile: "p", global: false },
-        null,
-        2
-      )
+      rulesetPath,
+      JSON.stringify({
+        sources: [relSource(projectRoot, sourceRoot)],
+        profile: BASE_PROFILE,
+        global: false
+      })
     );
-
-    runCli(["--root", projectRoot], { cwd: repoRoot, env: cliEnv });
-
-    const output = fs.readFileSync(path.join(projectRoot, "AGENTS.md"), "utf8");
-    expect(output).toBe(
-      withToolRules(
-        formatRuleBlock(
-          path.join(rulesRoot, "domains", "node", "domain.md"),
-          "# Domain\nD",
-          projectRoot
-        ) + "\n"
-      )
+    const rulesetBytes = fs.readFileSync(rulesetPath);
+    const globalPaths = DEFAULT_GLOBAL_OUTPUTS.map((target) =>
+      path.join(fakeHome, target.slice(2).replace(/\//gu, path.sep))
     );
-    for (const globalPath of DEFAULT_GLOBAL_OUTPUTS.map((filePath) =>
-      filePath.replace(/^~\//u, `${normalizePath(fakeHome)}/`)
-    )) {
-      expect(fs.existsSync(globalPath.replace(/\//g, path.sep))).toBe(false);
-    }
+    globalPaths.forEach((globalPath) => writeFile(globalPath, "stale\n"));
+    const before = globalPaths.map((globalPath) => fs.readFileSync(globalPath));
+
+    const result = runCliStatus(["--dry-run", "--json", "--root", projectRoot], {
+      cwd: repoRoot,
+      env: cliEnv
+    });
+    expect(result.status, result.stderr).toBe(0);
+    const json = JSON.parse(result.stdout);
+    expect(json.dryRun).toBe(true);
+    expect(json.globalOutputs).toEqual(DEFAULT_GLOBAL_OUTPUTS);
+    expect(
+      json.changes.filter(
+        ({ target, status }) => DEFAULT_GLOBAL_OUTPUTS.includes(target) && status === "updated"
+      )
+    ).toHaveLength(5);
+    expect(globalPaths.map((globalPath) => fs.readFileSync(globalPath))).toEqual(before);
+    expect(fs.readFileSync(rulesetPath)).toEqual(rulesetBytes);
+    expect(result.stderr).toContain('Deprecated ruleset key "global"');
   }));
+
+it("rejects the removed --no-global option before init writes and omits it from help", () =>
+  withTempRoot((tempRoot) => {
+    const projectRoot = path.join(tempRoot, "project");
+    const init = runCliStatus(["init", "--no-global", "--yes", "--root", projectRoot], {
+      cwd: repoRoot,
+      env: createCliEnv(path.join(tempRoot, "home"))
+    });
+    expect(init.status).not.toBe(0);
+    expect(init.stderr).toContain("Unknown argument: --no-global");
+    expect(fs.existsSync(path.join(projectRoot, "agent-ruleset.json"))).toBe(false);
+    expect(fs.existsSync(path.join(projectRoot, "AGENTS.md"))).toBe(false);
+
+    const help = runCli(["--help"], { cwd: repoRoot });
+    expect(help).not.toContain("--no-global");
+  }));
+
+it("keeps the public JSON Schema strict for global while accepting canonical config", () => {
+  const schema = JSON.parse(
+    fs.readFileSync(path.join(repoRoot, "agent-ruleset.schema.json"), "utf8")
+  );
+  const validate = new Ajv({ allErrors: true, strict: false }).compile(schema);
+  expect(validate({ sources: ["local"], profile: "base" })).toBe(true);
+  expect(validate({ sources: ["local"], profile: "base", global: false })).toBe(false);
+  expect(validate({ sources: ["local"], profile: "base", global: true })).toBe(false);
+});
+
+it.each([null, "false", 1, {}, []])(
+  "rejects invalid legacy global value %j before output",
+  (global) =>
+    withTempRoot((tempRoot) => {
+      const projectRoot = path.join(tempRoot, "project");
+      const home = path.join(tempRoot, "home");
+      const sourceRoot = path.join(tempRoot, "source");
+      writeBaseSource(sourceRoot);
+      writeFile(
+        path.join(projectRoot, "agent-ruleset.json"),
+        JSON.stringify({
+          sources: [relSource(projectRoot, sourceRoot)],
+          profile: BASE_PROFILE,
+          global
+        })
+      );
+      const result = runCliStatus(["--root", projectRoot], {
+        cwd: repoRoot,
+        env: createCliEnv(home)
+      });
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toMatch(/Invalid ruleset schema/u);
+      expect(fs.existsSync(path.join(projectRoot, "AGENTS.md"))).toBe(false);
+      expect(fs.existsSync(path.join(home, ".codex", "AGENTS.md"))).toBe(false);
+    })
+);
 
 it("supports source path pointing to a rules directory", () =>
   withTempRoot((tempRoot) => {
@@ -3078,14 +3225,25 @@ itGitWorkspace(
       expect(report.actualTokens).toBeLessThan(8001);
       expect(report.totalTokens).toBe(8001);
       const remoteBefore = getRemoteBranchSha(fixture);
+      const rulesetPath = path.join(fixture.projectRoot, "agent-ruleset.json");
+      const ruleset = JSON.parse(fs.readFileSync(rulesetPath, "utf8"));
+      ruleset.global = false;
+      writeFile(rulesetPath, JSON.stringify(ruleset, null, 2));
+      const rulesetBytes = fs.readFileSync(rulesetPath);
       const apply = runCliStatus(["apply-rules", "--root", fixture.projectRoot], {
         cwd: repoRoot,
         env: fixture.env
       });
       expect(apply.status).not.toBe(0);
       expect(apply.stderr).toMatch(/Global rules hard budget exceeded/u);
+      expect(apply.stderr.match(/Deprecated ruleset key "global"/gu)).toHaveLength(1);
       expect(getRemoteBranchSha(fixture)).toBe(remoteBefore);
       expect(fs.existsSync(path.join(fixture.projectRoot, "AGENTS.md"))).toBe(false);
+      expect(fs.readFileSync(rulesetPath)).toEqual(rulesetBytes);
+      for (const target of DEFAULT_GLOBAL_OUTPUTS) {
+        const globalPath = path.join(fixture.home, target.slice(2).replace(/\//gu, path.sep));
+        expect(fs.existsSync(globalPath)).toBe(false);
+      }
     })
 );
 
@@ -3151,6 +3309,11 @@ itGitWorkspace("apply-rules dry-run leaves Git refs, status, and generated files
     const globalOutputPath = path.join(fixture.home, ".codex", "AGENTS.md");
     const globalOutputContent = "existing global instructions\n";
     writeFile(globalOutputPath, globalOutputContent);
+    const rulesetPath = path.join(fixture.projectRoot, "agent-ruleset.json");
+    const ruleset = JSON.parse(fs.readFileSync(rulesetPath, "utf8"));
+    ruleset.global = false;
+    writeFile(rulesetPath, JSON.stringify(ruleset, null, 2));
+    const rulesetBytes = fs.readFileSync(rulesetPath);
     const result = runCliStatus(
       ["apply-rules", "--dry-run", "--json", "--root", fixture.projectRoot],
       {
@@ -3159,7 +3322,14 @@ itGitWorkspace("apply-rules dry-run leaves Git refs, status, and generated files
       }
     );
     expect(result.status).toBe(0);
-    expect(JSON.parse(result.stdout).dryRun).toBe(true);
+    const resultJson = JSON.parse(result.stdout);
+    expect(resultJson.dryRun).toBe(true);
+    expect(resultJson.globalOutputs).toEqual(DEFAULT_GLOBAL_OUTPUTS);
+    expect(
+      resultJson.changes.filter(({ scope, status }) => scope === "global" && status === "updated")
+    ).toHaveLength(5);
+    expect(result.stderr.match(/Deprecated ruleset key "global"/gu)).toHaveLength(1);
+    expect(fs.readFileSync(rulesetPath)).toEqual(rulesetBytes);
     expect(getRemoteBranchSha(fixture)).toBe(remoteBefore);
     expect(runGit(["rev-parse", "HEAD"], { cwd: fixture.workspaceRoot, env: fixture.env })).toBe(
       headBefore
@@ -3177,6 +3347,10 @@ itGitWorkspace("apply-rules dry-run leaves Git refs, status, and generated files
       repositoryOutputContents
     );
     expect(fs.readFileSync(globalOutputPath, "utf8")).toBe(globalOutputContent);
+    for (const target of DEFAULT_GLOBAL_OUTPUTS.slice(1)) {
+      const otherGlobalPath = path.join(fixture.home, target.slice(2).replace(/\//gu, path.sep));
+      expect(fs.existsSync(otherGlobalPath)).toBe(false);
+    }
     expect(fs.readFileSync(tracePath, "utf8")).not.toMatch(
       /built-in: git (fetch|checkout|merge|push)/u
     );

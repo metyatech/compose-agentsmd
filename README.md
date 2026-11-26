@@ -44,7 +44,7 @@ The tool reads `agent-ruleset.json` from the given root directory (default: curr
 
 By default, compose also writes a `CLAUDE.md` companion file containing an `@...` import pointing to the primary output file. You can disable this with `claude.enabled: false` in the ruleset.
 
-By default, compose writes each source's `rules/global` to these user-global instruction files with the same composed content:
+Compose always writes each source's `rules/global` to these user-global instruction files with the same composed content:
 
 - `~/.codex/AGENTS.md`
 - `~/.config/opencode/AGENTS.md`
@@ -83,7 +83,6 @@ Defaults:
 
 - `sources`: `["github:owner/repo"]`
 - `profile`: `node-cli`
-- `global`: omitted (defaults to `true`, meaning write user-global instruction files)
 - `claude`: `{ "enabled": true, "output": "CLAUDE.md" }`
 - `output`: `AGENTS.md`
 
@@ -115,7 +114,7 @@ compose-agentsmd check-budget --root path/to/project
 compose-agentsmd check-budget --root path/to/project --json
 ```
 
-`check-budget` counts current local source files or canonical GitHub workspaces, including uncommitted edits. It measures global rules even when the project ruleset has `global: false`; that setting still controls whether compose writes user-global files. For GitHub sources it validates the configured canonical branch/ref without fetching, then reads the editable workspace. It does not clone, fetch, push, generate output files, or fall back to a stale cache. A missing, detached, non-canonical, or incompatible workspace is an error. The JSON budget labels both exact counts: `actualTokens` uses the real source provenance, `canonicalTokens` renders the same bytes as a local absolute source from a stable temporary project root, and `totalTokens` is their maximum.
+`check-budget` counts current local source files or canonical GitHub workspaces, including uncommitted edits. For GitHub sources it validates the configured canonical branch/ref without fetching, then reads the editable workspace. It does not clone, fetch, push, generate output files, or fall back to a stale cache. A missing, detached, non-canonical, or incompatible workspace is an error. The JSON budget labels both exact counts: `actualTokens` uses the real source provenance, `canonicalTokens` renders the same bytes as a local absolute source from a stable temporary project root, and `totalTokens` is their maximum.
 
 Before any GitHub push or generated output, `apply-rules` validates and synchronizes every configured source, then measures all final editable source snapshots together and refuses a hard-limit overrun or any source/configuration error. No source sync or content mutation occurs between that final measurement and the first push. `apply-rules --dry-run` reports the would-be output and budget without cloning, fetching, checking out, merging, pushing, changing branches, or writing repository or user-global files. It requires all GitHub workspaces to already exist and be readable. Editing source files never commits them automatically.
 
@@ -155,7 +154,6 @@ Ruleset keys:
 
 - `sources` (required): non-empty ordered list of rules sources. Each entry is `github:owner/repo@ref` or a local path.
 - `profile` (required): profile name. It must be defined by at least one source's `agent-profiles.json`.
-- `global` (optional): write each source's `rules/global` to user-global instruction files (defaults to true). Set `false` to skip global writes.
 - `budget` (optional): global-rule budget thresholds in `o200k_base` tokens.
 - `budget.totalTokens` (optional): hard total token budget for the composed global instruction output (defaults to `8000`). Exceeding this is reported as a budget violation.
 - `budget.moduleTokens` (optional): per-module advisory threshold for each composed global rule section (defaults to `800`). Crossing this is **not** a violation; it triggers a review prompt to check whether the listed modules contain procedural content that should move to skills (procedures belong in skills, not rules).
@@ -196,6 +194,18 @@ Resolution rules:
 
 `compose-agentsmd` validates rulesets against `agent-ruleset.schema.json` on every run. If the ruleset does not conform to the schema, the tool exits with a schema error. The legacy `source`, `domains`, and `extra` keys are no longer accepted.
 
+### Upgrade from 7.3
+
+Before upgrading to 8.0, remove `global: true` or `global: false` from every
+ruleset and remove `--no-global` from scripts and command invocations. Version
+7.3 works with the key omitted. Version 8 always generates user-global files;
+if an old ruleset still contains a boolean `global`, it ignores that value and
+prints one migration warning per ruleset on standard error for that invocation.
+The CLI does not rewrite the ruleset, and `--quiet` suppresses the warning.
+Invalid non-boolean values still fail validation. The public JSON Schema rejects
+`global` even when it is boolean; the runtime adapter exists only to make
+upgrading old input files safe.
+
 ### Cache
 
 Remote sources are cached under `~/.agentsmd/cache/<owner>/<repo>/<ref>/`. Use `--refresh` to re-fetch or `--clear-cache` to remove cached rules.
@@ -211,7 +221,6 @@ Remote sources are cached under `~/.agentsmd/cache/<owner>/<repo>/<ref>/`. Use `
 - `--verbose` / `-v`: show verbose diagnostics
 - `--profile <name>`: profile name for `init`
 - `--output <file>`: repository output filename for `init`
-- `--no-global`: initialize without user-global rules
 - `--compose`: compose repository and user-global instruction files after `init`
 - `--dry-run`: show plan without writing files
 - `--yes`: skip init confirmation prompt
